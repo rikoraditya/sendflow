@@ -23,7 +23,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 // =============================
-// 🗄️ PostgreSQL (Supabase) Setup
+// 🗄️ PostgreSQL (Supabase)
 // =============================
 const pool = new Pool({
   host: process.env.PGHOST,
@@ -34,15 +34,11 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// ✅ Tes koneksi DB
 (async () => {
   try {
     await pool.query("SELECT 1");
-    console.log("✅ Supabase Database connected successfully");
-    console.log(
-      "🕓 Server timezone:",
-      new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })
-    );
+    console.log("✅ Supabase Database connected");
+    console.log("🕓 Server timezone:", new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" }));
   } catch (err) {
     console.error("❌ Database connection failed:", err.message);
     process.exit(1);
@@ -72,10 +68,7 @@ function normalizePhone(phone) {
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const workbook = XLSX.readFile(req.file.path);
-    const sheet = XLSX.utils.sheet_to_json(
-      workbook.Sheets[workbook.SheetNames[0]],
-      { defval: "" }
-    );
+    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
     let inserted = 0;
 
     for (const row of sheet) {
@@ -103,10 +96,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
 
     fs.unlinkSync(req.file.path);
-    res.json({
-      success: true,
-      message: `✅ ${inserted} kontak berhasil diupload & diperbarui.`,
-    });
+    res.json({ success: true, message: `✅ ${inserted} kontak berhasil diupload.` });
   } catch (err) {
     console.error("❌ Upload gagal:", err.message);
     res.status(500).json({ success: false, message: "Upload gagal." });
@@ -114,22 +104,15 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 });
 
 // =============================
-// 📱 Kirim Pesan Batch (20 kontak / 5 menit)
+// 📱 Kirim Pesan Batch
 // =============================
 app.post("/api/send", async (req, res) => {
   const { message_template, reminder_template } = req.body;
   try {
-    const { rows: contacts } = await pool.query(
-      "SELECT * FROM contacts WHERE status IN ('pending','failed')"
-    );
-    if (contacts.length === 0)
-      return res.json({
-        success: false,
-        message: "Tidak ada kontak untuk dikirim.",
-      });
+    const { rows: contacts } = await pool.query("SELECT * FROM contacts WHERE status IN ('pending','failed')");
+    if (contacts.length === 0) return res.json({ success: false, message: "Tidak ada kontak untuk dikirim." });
 
     console.log(`🚀 Mulai kirim ${contacts.length} kontak dalam batch 20 tiap 5 menit`);
-
     const batches = [];
     for (let i = 0; i < contacts.length; i += 20) {
       batches.push(contacts.slice(i, i + 20));
@@ -148,9 +131,7 @@ app.post("/api/send", async (req, res) => {
       for (const c of batch) {
         const phone = normalizePhone(c.phone);
         if (!phone) continue;
-
         let msg = message_template.replace(/{name}/g, c.name);
-        msg = msg.replace(/NIK:? ?{nik}/gi, "").replace(/{nik}/g, "");
 
         const form = new FormData();
         form.append("target", phone);
@@ -163,13 +144,16 @@ app.post("/api/send", async (req, res) => {
 
           if (resp.data.status) {
             await pool.query(
-              `
-              UPDATE contacts 
-              SET status='sent', last_sent=NOW(), reminder_message=$1, reminder_count=0
-              WHERE id=$2
-            `,
+              `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
               [reminder_template, c.id]
             );
+
+            await pool.query(
+              `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
+               VALUES ($1, 'initial', $2, $3, NOW())`,
+              [c.id, msg, JSON.stringify(resp.data)]
+            );
+
             console.log(`✅ Terkirim ke ${c.name}`);
           } else {
             await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
@@ -189,10 +173,7 @@ app.post("/api/send", async (req, res) => {
     };
 
     processBatch();
-    res.json({
-      success: true,
-      message: `Pengiriman dimulai — total ${contacts.length} kontak dalam ${batches.length} batch.`,
-    });
+    res.json({ success: true, message: `Pengiriman dimulai — total ${contacts.length} kontak.` });
   } catch (err) {
     console.error("❌ Error kirim:", err.message);
     res.status(500).json({ success: false, message: "Gagal kirim pesan." });
@@ -200,7 +181,7 @@ app.post("/api/send", async (req, res) => {
 });
 
 // =============================
-// 🔁 Reminder Otomatis (tiap jam WITA)
+// 🔁 Reminder Otomatis
 // =============================
 cron.schedule("0 * * * *", async () => {
   try {
@@ -217,8 +198,7 @@ cron.schedule("0 * * * *", async () => {
       const phone = normalizePhone(c.phone);
       if (!phone) continue;
 
-      const reminderMsg =
-        c.reminder_message || `Halo ${c.name}, ini pengingat dari kami 🙏`;
+      const reminderMsg = c.reminder_message || `Halo ${c.name}, ini pengingat dari kami 🙏`;
 
       const form = new FormData();
       form.append("target", phone);
@@ -230,14 +210,14 @@ cron.schedule("0 * * * *", async () => {
         });
 
         await pool.query(
-          `
-          UPDATE contacts
-          SET status='reminded',
-              reminder_count = reminder_count + 1,
-              last_sent=NOW()
-          WHERE id=$1
-        `,
+          `UPDATE contacts SET status='reminded', reminder_count = reminder_count + 1, last_sent=NOW() WHERE id=$1`,
           [c.id]
+        );
+
+        await pool.query(
+          `INSERT INTO messages (contact_id, type, message, created_at)
+           VALUES ($1, 'reminder', $2, NOW())`,
+          [c.id, reminderMsg]
         );
 
         console.log(`🔁 Reminder ke-${c.reminder_count + 1} terkirim ke ${c.name}`);
@@ -253,40 +233,30 @@ cron.schedule("0 * * * *", async () => {
 });
 
 // =============================
-// 📩 Webhook Fonnte → Balasan User
+// 📩 Webhook Fonnte (balasan pasien)
 // =============================
 app.post("/webhook/fonnte", async (req, res) => {
   try {
-    console.log("📬 [FONNTE WEBHOOK] Diterima:", req.body);
     const { phone, message } = req.body;
-
-    if (!phone || !message) {
-      console.log("⚠️ Webhook tanpa data lengkap.");
-      return res.sendStatus(400);
-    }
-
+    if (!phone || !message) return res.sendStatus(400);
     const normalizedPhone = normalizePhone(phone);
-    const now = new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" });
+
+    const { rows } = await pool.query("SELECT id FROM contacts WHERE phone=$1 LIMIT 1", [normalizedPhone]);
+    if (rows.length === 0) return res.sendStatus(200);
+    const contactId = rows[0].id;
 
     await pool.query(
-      `
-      UPDATE contacts
-      SET status='replied',
-          last_reply=NOW()
-      WHERE phone=$1
-    `,
-      [normalizedPhone]
+      `INSERT INTO messages (contact_id, type, message, created_at)
+       VALUES ($1, 'reply', $2, NOW())`,
+      [contactId, message]
     );
 
     await pool.query(
-      `
-      INSERT INTO messages (type, message, created_at)
-      VALUES ('reply', $1, NOW())
-    `,
-      [message]
+      `UPDATE contacts SET status='replied', last_reply=NOW() WHERE id=$1`,
+      [contactId]
     );
 
-    console.log(`💬 ${normalizedPhone} membalas: "${message}" (${now})`);
+    console.log(`💬 Balasan dari ${normalizedPhone}: "${message}"`);
     res.sendStatus(200);
   } catch (err) {
     console.error("❌ Error webhook Fonnte:", err.message);
@@ -295,16 +265,16 @@ app.post("/webhook/fonnte", async (req, res) => {
 });
 
 // =============================
-// 📋 API Kontak
+// 📋 API Kontak (dengan balasan terakhir)
 // =============================
 app.get("/api/contacts", async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT c.*, 
+      SELECT c.*,
              (
                SELECT m.message 
                FROM messages m 
-               WHERE m.type = 'reply'
+               WHERE m.contact_id = c.id AND m.type = 'reply'
                ORDER BY m.created_at DESC 
                LIMIT 1
              ) AS last_reply_message
@@ -330,7 +300,5 @@ app.get("/", (req, res) => {
 // =============================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(
-    `🚀 WhatsApp Auto Reminder running at http://localhost:${PORT} (WITA, sekarang: ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })})`
-  );
+  console.log(`🚀 Server running on http://localhost:${PORT} (WITA)`);
 });
