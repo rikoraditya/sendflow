@@ -19,6 +19,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// 🧩 Tambahkan middleware untuk parsing body (JSON & form-urlencoded)
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -39,6 +42,17 @@ const pool = new Pool({
   try {
     await pool.query("SELECT 1");
     console.log("✅ Supabase Database connected successfully");
+
+    // Pastikan tabel reply sudah ada
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reply (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(20),
+        message TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     console.log(
       "🕓 Server timezone:",
       new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })
@@ -260,27 +274,23 @@ app.post("/webhook/fonnte", async (req, res) => {
     const data = req.body;
     console.log("📬 Webhook Fonnte diterima:", data);
 
-    // contoh data webhook dari Fonnte:
-    // {
-    //   "phone": "6281234567890",
-    //   "message": "Oke kak",
-    //   "timestamp": "2025-11-07 10:00:00"
-    // }
-
-    const { phone, message, timestamp } = data;
+    const { phone, message } = data;
     const normalizedPhone = normalizePhone(phone);
-
     if (!normalizedPhone) return res.sendStatus(400);
 
+    // Simpan isi balasan user
     await pool.query(
-      `
-      UPDATE contacts
-      SET status='dibalas',
-          last_reply=$1,
-          reply_time=TO_TIMESTAMP($2, 'YYYY-MM-DD HH24:MI:SS')
-      WHERE phone=$3
-    `,
-      [message, timestamp, normalizedPhone]
+      `INSERT INTO reply (phone, message, created_at)
+       VALUES ($1, $2, NOW())`,
+      [normalizedPhone, message]
+    );
+
+    // Update status kontak ke 'dibalas'
+    await pool.query(
+      `UPDATE contacts
+       SET status='dibalas', last_reply=NOW()
+       WHERE phone=$1`,
+      [normalizedPhone]
     );
 
     console.log(`💬 ${normalizedPhone} membalas: "${message}"`);
