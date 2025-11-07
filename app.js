@@ -110,7 +110,8 @@ app.post("/api/send", async (req, res) => {
   const { message_template, reminder_template } = req.body;
   try {
     const { rows: contacts } = await pool.query("SELECT * FROM contacts WHERE status IN ('pending','failed')");
-    if (contacts.length === 0) return res.json({ success: false, message: "Tidak ada kontak untuk dikirim." });
+    if (contacts.length === 0)
+      return res.json({ success: false, message: "Tidak ada kontak untuk dikirim." });
 
     console.log(`🚀 Mulai kirim ${contacts.length} kontak dalam batch 20 tiap 5 menit`);
     const batches = [];
@@ -143,15 +144,19 @@ app.post("/api/send", async (req, res) => {
           });
 
           if (resp.data.status) {
-            await pool.query(
-              `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
-              [reminder_template, c.id]
-            );
+            // 🧹 Hapus pesan lama contact_id ini agar tidak menumpuk
+            await pool.query("DELETE FROM messages WHERE contact_id = $1", [c.id]);
 
+            // Simpan pesan baru
             await pool.query(
               `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
                VALUES ($1, 'initial', $2, $3, NOW())`,
               [c.id, msg, JSON.stringify(resp.data)]
+            );
+
+            await pool.query(
+              `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
+              [reminder_template, c.id]
             );
 
             console.log(`✅ Terkirim ke ${c.name}`);
@@ -162,7 +167,7 @@ app.post("/api/send", async (req, res) => {
           console.log(`⚠️ Gagal kirim ke ${c.phone}: ${err.message}`);
         }
 
-        await new Promise((r) => setTimeout(r, 2000)); // jeda antar pesan
+        await new Promise((r) => setTimeout(r, 2000));
       }
 
       batchIndex++;
@@ -181,116 +186,45 @@ app.post("/api/send", async (req, res) => {
 });
 
 // =============================
-// 🔁 Reminder Otomatis
-// =============================
-cron.schedule("0 * * * *", async () => {
-  try {
-    console.log("⏰ Cek reminder otomatis...");
-    const { rows } = await pool.query(`
-      SELECT * FROM contacts
-      WHERE status='sent'
-      AND (last_reply IS NULL OR status!='replied')
-      AND reminder_count < 2
-      AND NOW() - last_sent >= INTERVAL '24 hours'
-    `);
-
-    for (const c of rows) {
-      const phone = normalizePhone(c.phone);
-      if (!phone) continue;
-
-      const reminderMsg = c.reminder_message || `Halo ${c.name}, ini pengingat dari kami 🙏`;
-
-      const form = new FormData();
-      form.append("target", phone);
-      form.append("message", reminderMsg);
-
-      try {
-        await axios.post("https://api.fonnte.com/send", form, {
-          headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
-        });
-
-        await pool.query(
-          `UPDATE contacts SET status='reminded', reminder_count = reminder_count + 1, last_sent=NOW() WHERE id=$1`,
-          [c.id]
-        );
-
-        await pool.query(
-          `INSERT INTO messages (contact_id, type, message, created_at)
-           VALUES ($1, 'reminder', $2, NOW())`,
-          [c.id, reminderMsg]
-        );
-
-        console.log(`🔁 Reminder ke-${c.reminder_count + 1} terkirim ke ${c.name}`);
-      } catch (err) {
-        console.log(`⚠️ Reminder gagal ke ${c.phone}: ${err.message}`);
-      }
-
-      await new Promise((r) => setTimeout(r, 3000));
-    }
-  } catch (err) {
-    console.error("❌ Error CRON reminder:", err.message);
-  }
-});
-
-// =============================
 // 📩 Webhook Fonnte → Balasan User
 // =============================
 app.post("/webhook/fonnte", async (req, res) => {
   try {
-    const data = req.body;
-    console.log("📬 Webhook Fonnte diterima:", data);
-
-    const { phone, message } = data;
+    const { phone, message } = req.body;
     const normalizedPhone = normalizePhone(phone);
     if (!normalizedPhone) return res.status(400).send("Nomor tidak valid");
 
-    // 🔹 Cari contact_id berdasar nomor hp
-    const { rows: contactRows } = await pool.query(
-      "SELECT id FROM contacts WHERE phone = $1 LIMIT 1",
-      [normalizedPhone]
-    );
-    if (contactRows.length === 0) {
-      console.log("⚠️ Nomor belum terdaftar:", normalizedPhone);
-      return res.status(404).send("Nomor tidak ditemukan");
-    }
+    const { rows } = await pool.query("SELECT id FROM contacts WHERE phone=$1 LIMIT 1", [normalizedPhone]);
+    if (rows.length === 0) return res.status(404).send("Nomor tidak ditemukan");
 
-    const contactId = contactRows[0].id;
+    const contactId = rows[0].id;
 
-    // 🔹 Update tabel contacts → ubah status ke 'replied'
+    // 🧹 Hapus pesan reply lama (jika ada)
+    await pool.query("DELETE FROM messages WHERE contact_id = $1 AND type = 'reply'", [contactId]);
+
+    // Simpan pesan baru dari pasien
     await pool.query(
-      `UPDATE contacts 
-       SET status = 'replied', 
-           last_reply = NOW() 
-       WHERE id = $1`,
+      `INSERT INTO messages (contact_id, type, message, created_at)
+       VALUES ($1, 'reply', $2, NOW())`,
+      [contactId, message]
+    );
+
+    // Update status kontak jadi replied
+    await pool.query(
+      `UPDATE contacts SET status='replied', last_reply=NOW() WHERE id=$1`,
       [contactId]
     );
-
-    // 🔹 Update atau timpa message terakhir berdasarkan contact_id
-    const { rowCount } = await pool.query(
-      "UPDATE messages SET message = $1, fonnte_response = '{}', created_at = NOW() WHERE contact_id = $2 AND type = 'reply'",
-      [message, contactId]
-    );
-
-    if (rowCount === 0) {
-      // kalau belum ada balasan sebelumnya → buat baru
-      await pool.query(
-        `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
-         VALUES ($1, 'reply', $2, '{}', NOW())`,
-        [contactId, message]
-      );
-    }
 
     console.log(`💬 Balasan disimpan untuk contact_id=${contactId}: "${message}"`);
     res.sendStatus(200);
   } catch (err) {
-    console.error("❌ Error webhook Fonnte:", err.message);
+    console.error("❌ Error webhook:", err.message);
     res.status(500).send("Internal Server Error");
   }
 });
 
-
 // =============================
-// 📋 API Kontak (dengan balasan terakhir)
+// 📋 API Kontak
 // =============================
 app.get("/api/contacts", async (req, res) => {
   try {
