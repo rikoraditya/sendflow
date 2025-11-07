@@ -19,9 +19,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-
-// Middleware
-app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -173,13 +170,6 @@ app.post("/api/send", async (req, res) => {
             `,
               [reminder_template, c.id]
             );
-
-            await pool.query(
-              `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
-               VALUES ($1, 'initial', $2, $3, NOW())`,
-              [c.id, msg, JSON.stringify(resp.data)]
-            );
-
             console.log(`✅ Terkirim ke ${c.name}`);
           } else {
             await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
@@ -235,7 +225,7 @@ cron.schedule("0 * * * *", async () => {
       form.append("message", reminderMsg);
 
       try {
-        const resp = await axios.post("https://api.fonnte.com/send", form, {
+        await axios.post("https://api.fonnte.com/send", form, {
           headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
         });
 
@@ -248,12 +238,6 @@ cron.schedule("0 * * * *", async () => {
           WHERE id=$1
         `,
           [c.id]
-        );
-
-        await pool.query(
-          `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
-           VALUES ($1, 'reminder', $2, $3, NOW())`,
-          [c.id, reminderMsg, JSON.stringify(resp.data)]
         );
 
         console.log(`🔁 Reminder ke-${c.reminder_count + 1} terkirim ke ${c.name}`);
@@ -273,88 +257,61 @@ cron.schedule("0 * * * *", async () => {
 // =============================
 app.post("/webhook/fonnte", async (req, res) => {
   try {
-    console.log("📬 [FONNTE WEBHOOK] Raw data diterima:");
-    console.log(JSON.stringify(req.body, null, 2));
-
-    const phone = req.body.phone || req.body.sender;
-    const message = req.body.message || req.body.text;
+    console.log("📬 [FONNTE WEBHOOK] Diterima:", req.body);
+    const { phone, message } = req.body;
 
     if (!phone || !message) {
-      console.log("⚠️ Data webhook tidak lengkap:", req.body);
-      return res.status(400).send("Missing phone or message");
+      console.log("⚠️ Webhook tanpa data lengkap.");
+      return res.sendStatus(400);
     }
 
     const normalizedPhone = normalizePhone(phone);
-    console.log("✅ Nomor normalisasi:", normalizedPhone);
+    const now = new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" });
 
-    const { rows } = await pool.query(
-      "SELECT id FROM contacts WHERE phone = $1 LIMIT 1",
+    await pool.query(
+      `
+      UPDATE contacts
+      SET status='replied',
+          last_reply=NOW()
+      WHERE phone=$1
+    `,
       [normalizedPhone]
     );
 
-    if (rows.length === 0) {
-      console.log("⚠️ Nomor tidak ditemukan di tabel contacts:", normalizedPhone);
-      return res.status(404).send("Contact not found");
-    }
-
-    const contactId = rows[0].id;
-
     await pool.query(
-      `INSERT INTO messages (contact_id, type, message, created_at)
-       VALUES ($1, 'reply', $2, NOW())`,
-      [contactId, message]
+      `
+      INSERT INTO messages (type, message, created_at)
+      VALUES ('reply', $1, NOW())
+    `,
+      [message]
     );
 
-    await pool.query(
-      `UPDATE contacts 
-       SET status='replied', last_reply=NOW()
-       WHERE id=$1`,
-      [contactId]
-    );
-
-    console.log(`💬 Balasan dari ${normalizedPhone}: "${message}"`);
+    console.log(`💬 ${normalizedPhone} membalas: "${message}" (${now})`);
     res.sendStatus(200);
   } catch (err) {
     console.error("❌ Error webhook Fonnte:", err.message);
-    res.status(500).send(err.message);
+    res.sendStatus(500);
   }
 });
 
 // =============================
-// 📋 API Kontak (format waktu WITA)
+// 📋 API Kontak
 // =============================
 app.get("/api/contacts", async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT 
-        c.*, 
-        m.message AS last_reply_message,
-        m.created_at AS last_reply_time
+      SELECT c.*, 
+             (
+               SELECT m.message 
+               FROM messages m 
+               WHERE m.type = 'reply'
+               ORDER BY m.created_at DESC 
+               LIMIT 1
+             ) AS last_reply_message
       FROM contacts c
-      LEFT JOIN LATERAL (
-        SELECT message, created_at 
-        FROM messages 
-        WHERE contact_id = c.id AND type = 'reply'
-        ORDER BY created_at DESC
-        LIMIT 1
-      ) m ON TRUE
       ORDER BY c.created_at DESC
     `);
-
-    const formatted = rows.map((r) => ({
-      ...r,
-      last_reply_time: r.last_reply_time
-        ? new Intl.DateTimeFormat("id-ID", {
-            timeZone: "Asia/Makassar",
-            dateStyle: "short",
-            timeStyle: "short",
-          })
-            .format(new Date(r.last_reply_time))
-            .replace(".", ":") + " WITA"
-        : null,
-    }));
-
-    res.json(formatted);
+    res.json(rows);
   } catch (err) {
     console.error("❌ Error ambil kontak:", err.message);
     res.status(500).json({ success: false, message: "Gagal ambil data kontak." });
@@ -373,5 +330,7 @@ app.get("/", (req, res) => {
 // =============================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 WhatsApp Auto Reminder running at http://localhost:${PORT} (WITA)`);
+  console.log(
+    `🚀 WhatsApp Auto Reminder running at http://localhost:${PORT} (WITA, sekarang: ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })})`
+  );
 });
