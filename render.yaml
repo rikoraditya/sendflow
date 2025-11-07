@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: wa-fonnte-api
+    env: node
+    plan: free
+    region: singapore
+    buildCommand: "npm install"
+    startCommand: "node app.js"
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+    # ✅ Render internal cron (aman & legal)
+    cronJobs:
+      - name: reminder-cron
+        schedule: "*/10 * * * *"   # setiap 10 menit
+        command: "curl https://wa-fonnte-api.onrender.com/cron"

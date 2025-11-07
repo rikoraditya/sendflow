@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="id">
+<head>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SendFlow</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- 🌟 Header Start -->
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&display=swap" rel="stylesheet">
+ <!-- 🌟 Header Font & Style -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  
+  <style>
+    body { background: #f4f7fb; font-family: "Segoe UI", sans-serif; }
+    .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 12px; }
+    h1 { font-weight: 700; color: #1e40af; }
+    .btn { border-radius: 8px; }
+    textarea { font-size: 0.95rem; }
+    footer { text-align: center; color: #64748b; font-size: 0.85rem; margin-top: 40px; }
+    .bg-gradient { background: linear-gradient(90deg, #2563eb, #1e40af); color: white; border-radius: 12px 12px 0 0; padding: 15px; }
+    .pagination { justify-content: center; margin-top: 15px; }
+  </style>
+
+<style>
+  /* 🌈 Global Style */
+  body {
+    background: #f4f7fb;
+    font-family: "Poppins", sans-serif;
+  }
+
+  .card {
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+  }
+
+  h1 {
+    font-weight: 700;
+    color: #1e40af;
+  }
+
+  .btn {
+    border-radius: 8px;
+  }
+
+  textarea {
+    font-size: 0.95rem;
+  }
+
+  footer {
+    text-align: center;
+    color: #64748b;
+    font-size: 0.85rem;
+    margin-top: 40px;
+  }
+
+  .pagination {
+    justify-content: center;
+    margin-top: 15px;
+  }
+
+  /* ⚙️ Digital Header */
+  .header-digital {
+    background: linear-gradient(90deg, #2563eb, #1e40af);
+    border-radius: 16px;
+    padding: 40px 20px;
+    box-shadow: 0 4px 20px rgba(30, 64, 175, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: center;
+    color: #fff;
+  }
+
+  /* 🚀 Logo & Title */
+  .brand-title {
+    font-family: "Orbitron", sans-serif;
+    font-size: 2.8rem;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: #ffffff;
+    text-transform: uppercase;
+    text-shadow: 0 0 6px rgba(59, 130, 246, 0.8),
+                 0 0 12px rgba(37, 99, 235, 0.6);
+  }
+
+  .brand-title span {
+    background: linear-gradient(90deg, #93c5fd, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .brand-subtitle {
+    color: #cfe9ff;
+    font-weight: 500;
+    font-size: 1rem;
+    margin-top: 8px;
+    letter-spacing: 0.3px;
+  }
+</style>
+
+<style>
+  /* 🌟 Tabel Digital Modern - Versi Teks Kecil */
+  #contactTable {
+    font-size: 0.8rem;
+    border-radius: 10px;
+    overflow: hidden;
+    background: white;
+  }
+
+  #contactTable thead {
+    background: linear-gradient(90deg, #2563eb, #1e40af);
+    color: white;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  #contactTable th, 
+  #contactTable td {
+    padding: 8px 10px;
+    vertical-align: middle;
+  }
+
+  #contactTable tbody tr:nth-child(even) {
+    background-color: #f9fafb;
+  }
+
+  #contactTable tbody tr:hover {
+    background-color: #e0f2fe;
+    transition: background-color 0.2s ease-in-out;
+  }
+
+  #contactTable .badge {
+    font-size: 0.7rem;
+    padding: 5px 8px;
+    border-radius: 8px;
+  }
+
+  #contactTable a.btn {
+    font-size: 0.75rem;
+    padding: 3px 7px;
+    border-radius: 6px;
+  }
+
+  /* Pagination */
+  .pagination .page-link {
+    font-size: 0.8rem;
+    border-radius: 6px;
+    color: #1e40af;
+  }
+
+  .pagination .active .page-link {
+    background-color: #2563eb;
+    border-color: #2563eb;
+    color: white;
+  }
+
+  /* === ⚡ Energi Logo Style === */
+.logo-wrap { 
+  display: inline-block; 
+  vertical-align: middle; 
+  width: 70px; 
+  height: 70px;
+  margin-right: 10px;
+}
+.logo-energy { 
+  display: block; 
+  overflow: visible; 
+}
+
+/* Cincin energi berputar cepat */
+.energy-ring {
+  transform-origin: center;
+  animation: rotate-ring 2.5s linear infinite;
+}
+@keyframes rotate-ring {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Cahaya trail mengorbit */
+.trail {
+  transform-origin: 32px 32px;
+  animation: orbit 2.5s linear infinite;
+}
+@keyframes orbit {
+  from { transform: rotate(0deg) translate(0, -24px) rotate(0deg); opacity: 1; }
+  50% { opacity: 0.8; }
+  to { transform: rotate(360deg) translate(0, -24px) rotate(-360deg); opacity: 1; }
+}
+
+/* Petir dengan efek glow dan getaran halus */
+.bolt {
+  filter: drop-shadow(0 0 6px rgba(255,255,255,0.7))
+          drop-shadow(0 0 12px rgba(59,130,246,0.7));
+  animation: bolt-glow 1.8s ease-in-out infinite;
+}
+@keyframes bolt-glow {
+  0%, 100% { transform: scale(1); opacity: 1; filter: drop-shadow(0 0 6px rgba(255,255,255,0.6)); }
+  50% { transform: scale(1.1); opacity: 0.9; filter: drop-shadow(0 0 18px rgba(96,165,250,0.9)); }
+}
+
+/* === ✨ Text Styling === */
+.brand-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 700;
+  font-size: 2.6rem;
+  letter-spacing: 1px;
+  color: #ffffff;
+}
+
+.brand-text {
+  background: linear-gradient(90deg, #60a5fa, #38bdf8, #7c3aed);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 20px rgba(96,165,250,0.4);
+  animation: text-glow 4s ease-in-out infinite;
+}
+
+@keyframes text-glow {
+  0%, 100% { text-shadow: 0 0 12px rgba(96,165,250,0.6); }
+  50% { text-shadow: 0 0 20px rgba(124,58,237,0.8); }
+}
+
+.brand-subtitle {
+  color: #e0f2ff;
+  font-weight: 500;
+  font-size: 0.85rem;   /* lebih kecil dari sebelumnya */
+  letter-spacing: 0.3px;
+  margin-top: 5px;
+  opacity: 0.5;         /* membuat efek lembut & futuristik */
+}
+
+
+/* 🔹 Overlay Loading */
+#loadingOverlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  text-align: center;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  color: #1e40af;
+  font-weight: 600;
+  font-family: "Poppins", sans-serif;
+  font-size: 1rem;
+}
+
+/* Aktifkan Flex Mode */
+#loadingOverlay.active {
+  display: flex;
+}
+
+/* ⚡ Petir Animasi */
+.lightning {
+  width: 50px;
+  height: 80px;
+  position: relative;
+  background: linear-gradient(to bottom, #3b82f6, #1d4ed8);
+  clip-path: polygon(50% 0%, 65% 35%, 45% 35%, 60% 70%, 35% 70%, 55% 100%, 25% 60%, 45% 60%);
+  box-shadow: 0 0 25px 8px rgba(59,130,246,0.5);
+  animation: flash 1s infinite ease-in-out;
+  margin-bottom: 12px;
+}
+
+@keyframes flash {
+  0%, 100% {
+    opacity: 0.8;
+    transform: scale(1);
+    box-shadow: 0 0 20px rgba(59,130,246,0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+    box-shadow: 0 0 40px rgba(59,130,246,0.9);
+  }
+}
+
+
+</style>
+
+
+</head>
+<body>
+  <div class="container py-4">
+    <div class="header-digital text-center mb-4 py-4">
+  <h1 class="brand-title">
+  <span class="logo-wrap">
+    <svg class="logo-energy" width="70" height="70" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- Latar glow -->
+      <circle cx="32" cy="32" r="30" fill="url(#grad-bg)" opacity="0.15"></circle>
+
+      <!-- Energi melingkar -->
+      <g class="energy-ring">
+        <circle cx="32" cy="32" r="24" stroke="url(#grad-ring)" stroke-width="3" fill="none" stroke-linecap="round"/>
+      </g>
+
+      <!-- Cahaya trail -->
+      <circle class="trail" cx="32" cy="8" r="4" fill="url(#grad-trail)" />
+
+      <!-- Ikon petir -->
+      <polygon class="bolt" points="28,18 38,18 30,34 38,34 26,50 30,38 22,38" fill="#ffffff" />
+
+      <defs>
+        <linearGradient id="grad-bg" x1="0%" x2="100%">
+          <stop offset="0%" stop-color="#3b82f6"/>
+          <stop offset="100%" stop-color="#06b6d4"/>
+        </linearGradient>
+
+        <linearGradient id="grad-ring" x1="0%" x2="100%">
+          <stop offset="0%" stop-color="#60a5fa"/>
+          <stop offset="100%" stop-color="#7c3aed"/>
+        </linearGradient>
+
+        <radialGradient id="grad-trail" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#f0f9ff" />
+          <stop offset="100%" stop-color="rgba(59,130,246,0)" />
+        </radialGradient>
+      </defs>
+    </svg>
+  </span>
+
+  <span class="brand-text">SendFlow</span>
+</h1>
+
+  <p class="brand-subtitle">Kelola pesan & reminder otomatis 24JAM dengan SendFlow</p>
+
+</div>
+    <!-- Upload Excel -->
+   <div class="card mb-4">
+  <div class="card-body">
+    <h5>1️⃣ Upload Data Kontak (Excel)</h5>
+    <form id="uploadForm" class="d-flex align-items-center gap-3">
+      <input type="file" class="form-control" id="file" accept=".xlsx,.xls" required>
+      <button class="btn btn-primary px-4" type="submit">📤 Upload</button>
+    </form>
+
+    <div id="uploadRes" class=" text-success small"></div>
+
+    <p class=" mb-0 small text-muted" style="opacity: 0.6;">
+      Upload file Excel dengan kolom:
+      <strong>nik</strong> | <strong>name</strong> | <strong>phone</strong>
+    </p>
+  </div>
+</div>
+
+
+    <!-- Template Pesan -->
+    <div class="card mb-4">
+      <div class="card-body">
+        <h5>2️⃣ Template Pesan Utama</h5>
+        <textarea id="message" class="form-control mb-3 text-muted " style="font-size: 0.8rem;" rows="4">Selamat Pagi atau Siang
+Yth. Bapak/Ibu {name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan Oktober ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
+Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini ATAU menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
+Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
+Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
+Terima kasih atas perhatiannya🙏</textarea>
+
+        <h5 class="mt-4">3️⃣ Template Reminder</h5>
+        <textarea id="reminder" class="form-control mb-3 text-muted " style="font-size: 0.8rem;" rows="3">Selamat Pagi, Siang, Sore, dan Malam
+Yth. Bapak/Ibu 
+Kami dari team Prolanis Klinik Karya Prima, mohon izin menindaklanjuti whatsapp kami sebelumnya. 
+Kami mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
+Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini ATAU menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
+Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
+Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
+
+Jangan lupa jaga pola makan, minum rendah gula serta garam, dan olahraga minimal 30 menit pada saat pagi hari, nggih.
+Terimakasih atas perhatiannya. <br> Salam Sehat Selalu 😇🙏</textarea>
+
+       <!-- Tombol Kirim -->
+<button id="send" style="font-size: 0.8rem;" class="btn btn-success px-4">
+  🚀 Kirim Pesan Sekarang
+</button>
+
+<!-- Overlay Loading -->
+<div id="loadingOverlay">
+  <div class="lightning"></div>
+  <p>SendFlow mengirim pesan... mohon menunggu</p>
+</div>
+
+
+        <div id="sendRes" class="mt-3 text-info small"></div>
+      </div>
+    </div>
+
+    <!-- 4️⃣ Jadwal Otomatis -->
+    <div class="card mb-4">
+      <div class="card-body">
+        <h5>4️⃣ Pengingat Otomatis</h5>
+        <p class="text-muted small mb-2">
+          Sistem akan otomatis mengirimkan pesan reminder <b>1x 24 Jam (Maksimal 2x Reminder)</b> dikirim
+          jika belum ada balasan dari pasien prolanis.
+        </p>
+        <p class="text-muted small mb-0">
+          Tidak perlu membuka halaman ini setiap saat — <b>SendFlow</b> akan menangani pengiriman reminder otomatis.
+        </p>
+      </div>
+    </div>
+
+    <!-- 5️⃣ Tabel Data Kontak -->
+    <div class="card mb-4">
+      <div class="card-body">
+        <h5>5️⃣ Data Kontak & Status Pesan</h5>
+        <div class="table-responsive">
+          <table class="table table-bordered table-hover align-middle" id="contactTable">
+            <thead class="table-primary">
+              <tr class="text-center" >
+                <th>#</th>
+                <th>Nama</th>
+                <th>No. HP</th>
+                <th>NIK</th>
+                <th>Status</th>
+                <th>Terakhir Dikirim</th>
+                <th>Balasan Terakhir</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="8" class="text-center text-muted">Memuat data...</td></tr></tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <nav>
+          <ul class="pagination" id="pagination"></ul>
+        </nav>
+      </div>
+    </div>
+
+  <footer>
+  © 2025 - WhatsApp Auto Reminder with Integration APi by 
+  <a href="https://rikoraditya87.github.io/RikoRaditya/" target="_blank" class="text-decoration-none text-primary fw-semibold">
+    DeyR
+  </a>
+</footer>
+
+  </div>
+  <script>
+// 🔹 Format waktu ke zona Bali (WITA)
+function formatBaliTime(utcString) {
+  if (!utcString) return '-';
+  const date = new Date(utcString);
+  return date.toLocaleString('id-ID', {
+    timeZone: 'Asia/Makassar',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).replace('.', '') + ' WITA';
+}
+</script>
+
+
+  <script>
+    let contacts = [];
+    const limit = 8; // tampil 8 data per halaman
+    let currentPage = 1;
+
+    // Upload Excel
+    document.getElementById('uploadForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const f = document.getElementById('file').files[0];
+      if(!f) return alert('Pilih file terlebih dahulu!');
+      const fd = new FormData();
+      fd.append('file', f);
+      const res = await fetch('/api/upload', {method:'POST', body:fd});
+      const j = await res.json();
+      document.getElementById('uploadRes').innerText = j.message;
+      loadContacts();
+    });
+
+    // Kirim Pesan
+    document.getElementById('send').addEventListener('click', async ()=>{
+      const msg = document.getElementById('message').value.trim();
+      const reminder = document.getElementById('reminder').value.trim();
+      if(!msg || !reminder) return alert('Isi kedua template pesan!');
+      const res = await fetch('/api/send',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({message_template: msg, reminder_template: reminder})
+      });
+      const j = await res.json();
+      document.getElementById('sendRes').innerText = j.message;
+      loadContacts();
+    });
+
+    // Muat tabel kontak
+    async function loadContacts(){
+      const res = await fetch('/api/contacts');
+      contacts = await res.json();
+      currentPage = 1;
+      renderTable();
+    }
+
+    function renderTable(){
+      const tbody = document.querySelector('#contactTable tbody');
+      tbody.innerHTML = '';
+      if(contacts.length === 0){
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Belum ada data kontak</td></tr>';
+        return;
+      }
+
+      const start = (currentPage - 1) * limit;
+      const end = start + limit;
+      const pageData = contacts.slice(start, end);
+
+      pageData.forEach((c, i)=>{
+        tbody.innerHTML += `
+          <tr>
+            <td class="text-center">${start + i + 1}</td>
+            <td>${c.name}</td>
+            <td>${c.phone}</td>
+            <td>${c.nik || '-'}</td>
+            <td class="text-center"><span class="badge bg-${statusColor(c.status)}">${c.status}</span></td>
+            <td>${formatBaliTime(c.last_sent)}</td>
+            <td class="small">${c.last_reply_message ? c.last_reply_message : '-'}</td>
+            <td class="text-center">
+              <a href="https://wa.me/${c.phone}" target="_blank" class="btn btn-sm btn-outline-success">💬 Proses WA</a>
+            </td>
+          </tr>`;
+      });
+
+      renderPagination();
+    }
+
+    function renderPagination(){
+      const totalPages = Math.ceil(contacts.length / limit);
+      const pagination = document.getElementById('pagination');
+      pagination.innerHTML = '';
+
+      if(totalPages <= 1) return;
+
+      const prevDisabled = currentPage === 1 ? 'disabled' : '';
+      const nextDisabled = currentPage === totalPages ? 'disabled' : '';
+
+      pagination.innerHTML += `
+        <li class="page-item ${prevDisabled}">
+          <span class="page-link" onclick="changePage(${currentPage - 1})">&laquo;</span>
+        </li>
+      `;
+
+      for(let i = 1; i <= totalPages; i++){
+        pagination.innerHTML += `
+          <li class="page-item ${i === currentPage ? 'active' : ''}">
+            <span class="page-link" onclick="changePage(${i})">${i}</span>
+          </li>
+        `;
+      }
+
+      pagination.innerHTML += `
+        <li class="page-item ${nextDisabled}">
+          <span class="page-link" onclick="changePage(${currentPage + 1})">&raquo;</span>
+        </li>
+      `;
+    }
+
+    function changePage(page){
+      const totalPages = Math.ceil(contacts.length / limit);
+      if(page < 1 || page > totalPages) return;
+      currentPage = page;
+      renderTable();
+    }
+
+    function statusColor(status){
+      switch(status){
+        case 'sent': return 'info';
+        case 'replied': return 'success';
+        case 'reminded': return 'warning';
+        case 'failed': return 'danger';
+        default: return 'secondary';
+      }
+    }
+
+    loadContacts();
+    setInterval(loadContacts, 30000);
+  </script>
+
+
+<script>
+const sendButton = document.getElementById('send');
+const overlay = document.getElementById('loadingOverlay');
+
+sendButton.addEventListener('click', async () => {
+  overlay.classList.add('active'); // tampilkan animasi petir
+  document.body.style.pointerEvents = "none"; // cegah klik lain
+
+  try {
+    // Jalankan logika kirim pesan kamu di sini
+    await new Promise(r => setTimeout(r, 4000)); // simulasi delay
+  } finally {
+    overlay.classList.remove('active');
+    document.body.style.pointerEvents = "auto";
+  }
+});
+</script>
+
+</body>
+</html>
