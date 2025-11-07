@@ -20,7 +20,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middleware penting
+// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -273,24 +273,28 @@ cron.schedule("0 * * * *", async () => {
 // =============================
 app.post("/webhook/fonnte", async (req, res) => {
   try {
-    console.log("📬 Webhook Fonnte diterima:", req.body);
+    console.log("📬 [FONNTE WEBHOOK] Raw data diterima:");
+    console.log(JSON.stringify(req.body, null, 2));
 
     const phone = req.body.phone || req.body.sender;
     const message = req.body.message || req.body.text;
+
     if (!phone || !message) {
       console.log("⚠️ Data webhook tidak lengkap:", req.body);
-      return res.sendStatus(400);
+      return res.status(400).send("Missing phone or message");
     }
 
     const normalizedPhone = normalizePhone(phone);
+    console.log("✅ Nomor normalisasi:", normalizedPhone);
+
     const { rows } = await pool.query(
       "SELECT id FROM contacts WHERE phone = $1 LIMIT 1",
       [normalizedPhone]
     );
 
     if (rows.length === 0) {
-      console.log("⚠️ Nomor tidak ditemukan di database:", normalizedPhone);
-      return res.sendStatus(200);
+      console.log("⚠️ Nomor tidak ditemukan di tabel contacts:", normalizedPhone);
+      return res.status(404).send("Contact not found");
     }
 
     const contactId = rows[0].id;
@@ -311,8 +315,8 @@ app.post("/webhook/fonnte", async (req, res) => {
     console.log(`💬 Balasan dari ${normalizedPhone}: "${message}"`);
     res.sendStatus(200);
   } catch (err) {
-    console.error("❌ Error webhook Fonnte:", err);
-    res.sendStatus(500);
+    console.error("❌ Error webhook Fonnte:", err.message);
+    res.status(500).send(err.message);
   }
 });
 
@@ -337,7 +341,6 @@ app.get("/api/contacts", async (req, res) => {
       ORDER BY c.created_at DESC
     `);
 
-    // Format waktu ke zona WITA
     const formatted = rows.map((r) => ({
       ...r,
       last_reply_time: r.last_reply_time
