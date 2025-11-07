@@ -208,7 +208,7 @@ cron.schedule("0 * * * *", async () => {
     const { rows } = await pool.query(`
       SELECT * FROM contacts
       WHERE status='sent'
-      AND (last_reply IS NULL OR status!='replied')
+      AND (last_reply IS NULL OR status!='dibalas')
       AND reminder_count < 2
       AND NOW() - last_sent >= INTERVAL '24 hours'
     `);
@@ -249,6 +249,45 @@ cron.schedule("0 * * * *", async () => {
     }
   } catch (err) {
     console.error("❌ Error CRON reminder:", err.message);
+  }
+});
+
+// =============================
+// 📩 Webhook Fonnte → Balasan User
+// =============================
+app.post("/webhook/fonnte", async (req, res) => {
+  try {
+    const data = req.body;
+    console.log("📬 Webhook Fonnte diterima:", data);
+
+    // contoh data webhook dari Fonnte:
+    // {
+    //   "phone": "6281234567890",
+    //   "message": "Oke kak",
+    //   "timestamp": "2025-11-07 10:00:00"
+    // }
+
+    const { phone, message, timestamp } = data;
+    const normalizedPhone = normalizePhone(phone);
+
+    if (!normalizedPhone) return res.sendStatus(400);
+
+    await pool.query(
+      `
+      UPDATE contacts
+      SET status='dibalas',
+          last_reply=$1,
+          reply_time=TO_TIMESTAMP($2, 'YYYY-MM-DD HH24:MI:SS')
+      WHERE phone=$3
+    `,
+      [message, timestamp, normalizedPhone]
+    );
+
+    console.log(`💬 ${normalizedPhone} membalas: "${message}"`);
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("❌ Error webhook Fonnte:", err.message);
+    res.sendStatus(500);
   }
 });
 
