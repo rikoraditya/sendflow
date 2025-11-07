@@ -60,12 +60,11 @@ function normalizePhone(phone) {
 }
 
 // =============================
-// 📤 Upload Excel → Simpan ke DB
+// 📁 Upload Excel → Simpan ke DB
 // =============================
-import upload from "multer";
-const uploader = upload({ dest: "uploads/" });
+const upload = multer({ dest: "uploads/" });
 
-app.post("/api/upload", uploader.single("file"), async (req, res) => {
+app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const workbook = XLSX.readFile(req.file.path);
     const sheet = XLSX.utils.sheet_to_json(
@@ -106,6 +105,128 @@ app.post("/api/upload", uploader.single("file"), async (req, res) => {
 });
 
 // =============================
+// 📱 Kirim Pesan Batch (20 kontak / 5 menit)
+// =============================
+app.post("/api/send", async (req, res) => {
+  const { message_template, reminder_template } = req.body;
+  try {
+    const { rows: contacts } = await pool.query(
+      "SELECT * FROM contacts WHERE status IN ('pending','failed') ORDER BY created_at ASC"
+    );
+    if (contacts.length === 0)
+      return res.json({ success: false, message: "Tidak ada kontak untuk dikirim." });
+
+    console.log(`🚀 Mulai kirim ${contacts.length} kontak dalam batch 20 tiap 5 menit`);
+    const batches = [];
+    for (let i = 0; i < contacts.length; i += 20) {
+      batches.push(contacts.slice(i, i + 20));
+    }
+
+    let batchIndex = 0;
+    const processBatch = async () => {
+      if (batchIndex >= batches.length) {
+        console.log("✅ Semua batch selesai dikirim.");
+        return;
+      }
+
+      const batch = batches[batchIndex];
+      console.log(`📦 Batch ${batchIndex + 1}/${batches.length}`);
+
+      for (const c of batch) {
+        const phone = normalizePhone(c.phone);
+        if (!phone) continue;
+        let msg = message_template.replace(/{name}/g, c.name);
+
+        const form = new FormData();
+        form.append("target", phone);
+        form.append("message", msg);
+
+        try {
+          const resp = await axios.post("https://api.fonnte.com/send", form, {
+            headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
+          });
+
+          if (resp.data.status) {
+            await pool.query(
+              `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
+              [reminder_template, c.id]
+            );
+            console.log(`✅ Terkirim ke ${c.name}`);
+          } else {
+            await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
+          }
+        } catch (err) {
+          console.log(`⚠️ Gagal kirim ke ${c.phone}: ${err.message}`);
+        }
+
+        await new Promise((r) => setTimeout(r, 2000)); // jeda antar pesan
+      }
+
+      batchIndex++;
+      if (batchIndex < batches.length) {
+        console.log("⏳ Tunggu 5 menit sebelum batch berikutnya...");
+        setTimeout(processBatch, 5 * 60 * 1000);
+      }
+    };
+
+    processBatch();
+    res.json({
+      success: true,
+      message: `Pengiriman dimulai — total ${contacts.length} kontak dalam ${batches.length} batch.`,
+    });
+  } catch (err) {
+    console.error("❌ Error kirim:", err.message);
+    res.status(500).json({ success: false, message: "Gagal kirim pesan." });
+  }
+});
+
+// =============================
+// 🔁 Reminder Otomatis Tiap Jam (24 jam setelah pesan dikirim)
+// =============================
+cron.schedule("0 * * * *", async () => {
+  try {
+    console.log("⏰ Cek reminder otomatis...");
+    const { rows } = await pool.query(`
+      SELECT * FROM contacts
+      WHERE status='sent'
+      AND (last_reply IS NULL OR status!='replied')
+      AND reminder_count < 2
+      AND NOW() - last_sent >= INTERVAL '24 hours'
+    `);
+
+    for (const c of rows) {
+      const phone = normalizePhone(c.phone);
+      if (!phone) continue;
+
+      const reminderMsg = c.reminder_message || `Halo ${c.name}, ini pengingat dari kami 🙏`;
+
+      const form = new FormData();
+      form.append("target", phone);
+      form.append("message", reminderMsg);
+
+      try {
+        await axios.post("https://api.fonnte.com/send", form, {
+          headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
+        });
+
+        await pool.query(
+          `UPDATE contacts SET status='reminded', reminder_count = reminder_count + 1, last_sent=NOW() WHERE id=$1`,
+          [c.id]
+        );
+
+        console.log(`🔁 Reminder ke-${c.reminder_count + 1} terkirim ke ${c.name}`);
+      } catch (err) {
+        console.log(`⚠️ Reminder gagal ke ${c.phone}: ${err.message}`);
+      }
+
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  } catch (err) {
+    console.error("❌ Error CRON reminder:", err.message);
+  }
+});
+
+// =============================
 // 📩 Webhook Fonnte → Balasan Pasien
 // =============================
 app.post("/webhook/fonnte", async (req, res) => {
@@ -114,21 +235,16 @@ app.post("/webhook/fonnte", async (req, res) => {
     const phone = data.phone || data.sender;
     const message = data.message || "";
 
-    // Log ke file agar bisa dilihat di Railway (untuk debugging)
     fs.appendFileSync(
       path.join(__dirname, "webhook.log"),
       `[${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })}] ${JSON.stringify(
-        data
-      )}\n`
+        data,
+        null,
+        2
+      )}\n\n`
     );
 
-    // Jika bukan pesan masuk (status update)
-    if (!phone || !message) {
-      console.log("ℹ️ Webhook status update diterima, bukan pesan pasien.");
-      return res.sendStatus(200);
-    }
-
-    console.log("📬 Webhook Fonnte diterima:", data);
+    if (!phone || !message) return res.sendStatus(200);
 
     const normalizedPhone = normalizePhone(phone);
     if (!normalizedPhone) return res.status(400).send("Nomor tidak valid");
@@ -137,24 +253,17 @@ app.post("/webhook/fonnte", async (req, res) => {
       "SELECT id FROM contacts WHERE phone=$1 LIMIT 1",
       [normalizedPhone]
     );
-    if (rows.length === 0) {
-      console.log("⚠️ Nomor tidak terdaftar:", normalizedPhone);
-      return res.sendStatus(200);
-    }
+    if (rows.length === 0) return res.sendStatus(200);
 
     const contactId = rows[0].id;
 
-    // 🔹 Hapus balasan lama agar 1 row per contact
     await pool.query("DELETE FROM reply WHERE contact_id=$1", [contactId]);
-
-    // 🔹 Simpan balasan baru
     await pool.query(
       `INSERT INTO reply (contact_id, phone, message, created_at)
        VALUES ($1, $2, $3, NOW())`,
       [contactId, normalizedPhone, message]
     );
 
-    // 🔹 Update status di contacts
     await pool.query(
       `UPDATE contacts SET status='replied', last_reply=NOW() WHERE id=$1`,
       [contactId]
