@@ -20,7 +20,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// 🧩 Tambahkan middleware untuk parsing body (JSON & form-urlencoded)
+// Middleware penting untuk menerima body JSON & form-urlencoded
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -42,17 +42,6 @@ const pool = new Pool({
   try {
     await pool.query("SELECT 1");
     console.log("✅ Supabase Database connected successfully");
-
-    // Pastikan tabel reply sudah ada
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS reply (
-        id SERIAL PRIMARY KEY,
-        phone VARCHAR(20),
-        message TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
     console.log(
       "🕓 Server timezone:",
       new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })
@@ -184,6 +173,14 @@ app.post("/api/send", async (req, res) => {
             `,
               [reminder_template, c.id]
             );
+
+            // simpan pesan ke tabel messages
+            await pool.query(
+              `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
+               VALUES ($1, 'initial', $2, $3, NOW())`,
+              [c.id, msg, JSON.stringify(resp.data)]
+            );
+
             console.log(`✅ Terkirim ke ${c.name}`);
           } else {
             await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
@@ -239,7 +236,7 @@ cron.schedule("0 * * * *", async () => {
       form.append("message", reminderMsg);
 
       try {
-        await axios.post("https://api.fonnte.com/send", form, {
+        const resp = await axios.post("https://api.fonnte.com/send", form, {
           headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
         });
 
@@ -252,6 +249,13 @@ cron.schedule("0 * * * *", async () => {
           WHERE id=$1
         `,
           [c.id]
+        );
+
+        // simpan ke tabel messages
+        await pool.query(
+          `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
+           VALUES ($1, 'reminder', $2, $3, NOW())`,
+          [c.id, reminderMsg, JSON.stringify(resp.data)]
         );
 
         console.log(`🔁 Reminder ke-${c.reminder_count + 1} terkirim ke ${c.name}`);
@@ -278,22 +282,35 @@ app.post("/webhook/fonnte", async (req, res) => {
     const normalizedPhone = normalizePhone(phone);
     if (!normalizedPhone) return res.sendStatus(400);
 
-    // Simpan isi balasan user
-    await pool.query(
-      `INSERT INTO reply (phone, message, created_at)
-       VALUES ($1, $2, NOW())`,
-      [normalizedPhone, message]
-    );
-
-    // Update status kontak ke 'dibalas'
-    await pool.query(
-      `UPDATE contacts
-       SET status='dibalas', last_reply=NOW()
-       WHERE phone=$1`,
+    // cari contact_id
+    const { rows } = await pool.query(
+      "SELECT id FROM contacts WHERE phone = $1 LIMIT 1",
       [normalizedPhone]
     );
 
-    console.log(`💬 ${normalizedPhone} membalas: "${message}"`);
+    if (rows.length === 0) {
+      console.log("⚠️ Nomor tidak ditemukan di database:", normalizedPhone);
+      return res.sendStatus(200);
+    }
+
+    const contactId = rows[0].id;
+
+    // simpan balasan user ke tabel messages
+    await pool.query(
+      `INSERT INTO messages (contact_id, type, message, created_at)
+       VALUES ($1, 'reply', $2, NOW())`,
+      [contactId, message]
+    );
+
+    // update status kontak ke 'dibalas'
+    await pool.query(
+      `UPDATE contacts 
+       SET status='dibalas', last_reply=NOW()
+       WHERE id=$1`,
+      [contactId]
+    );
+
+    console.log(`💬 Balasan dari ${normalizedPhone}: "${message}"`);
     res.sendStatus(200);
   } catch (err) {
     console.error("❌ Error webhook Fonnte:", err.message);
