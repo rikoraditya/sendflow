@@ -20,7 +20,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middleware penting untuk menerima body JSON & form-urlencoded
+// Middleware penting
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -174,7 +174,6 @@ app.post("/api/send", async (req, res) => {
               [reminder_template, c.id]
             );
 
-            // simpan pesan ke tabel messages
             await pool.query(
               `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
                VALUES ($1, 'initial', $2, $3, NOW())`,
@@ -219,7 +218,7 @@ cron.schedule("0 * * * *", async () => {
     const { rows } = await pool.query(`
       SELECT * FROM contacts
       WHERE status='sent'
-      AND (last_reply IS NULL OR status!='dibalas')
+      AND (last_reply IS NULL OR status!='replied')
       AND reminder_count < 2
       AND NOW() - last_sent >= INTERVAL '24 hours'
     `);
@@ -251,7 +250,6 @@ cron.schedule("0 * * * *", async () => {
           [c.id]
         );
 
-        // simpan ke tabel messages
         await pool.query(
           `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
            VALUES ($1, 'reminder', $2, $3, NOW())`,
@@ -275,14 +273,16 @@ cron.schedule("0 * * * *", async () => {
 // =============================
 app.post("/webhook/fonnte", async (req, res) => {
   try {
-    const data = req.body;
-    console.log("📬 Webhook Fonnte diterima:", data);
+    console.log("📬 Webhook Fonnte diterima:", req.body);
 
-    const { phone, message } = data;
+    const phone = req.body.phone || req.body.sender;
+    const message = req.body.message || req.body.text;
+    if (!phone || !message) {
+      console.log("⚠️ Data webhook tidak lengkap:", req.body);
+      return res.sendStatus(400);
+    }
+
     const normalizedPhone = normalizePhone(phone);
-    if (!normalizedPhone) return res.sendStatus(400);
-
-    // cari contact_id
     const { rows } = await pool.query(
       "SELECT id FROM contacts WHERE phone = $1 LIMIT 1",
       [normalizedPhone]
@@ -295,17 +295,15 @@ app.post("/webhook/fonnte", async (req, res) => {
 
     const contactId = rows[0].id;
 
-    // simpan balasan user ke tabel messages
     await pool.query(
       `INSERT INTO messages (contact_id, type, message, created_at)
        VALUES ($1, 'reply', $2, NOW())`,
       [contactId, message]
     );
 
-    // update status kontak ke 'dibalas'
     await pool.query(
       `UPDATE contacts 
-       SET status='dibalas', last_reply=NOW()
+       SET status='replied', last_reply=NOW()
        WHERE id=$1`,
       [contactId]
     );
@@ -313,18 +311,47 @@ app.post("/webhook/fonnte", async (req, res) => {
     console.log(`💬 Balasan dari ${normalizedPhone}: "${message}"`);
     res.sendStatus(200);
   } catch (err) {
-    console.error("❌ Error webhook Fonnte:", err.message);
+    console.error("❌ Error webhook Fonnte:", err);
     res.sendStatus(500);
   }
 });
 
 // =============================
-// 📋 API Kontak
+// 📋 API Kontak (format waktu WITA)
 // =============================
 app.get("/api/contacts", async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM contacts ORDER BY created_at DESC");
-    res.json(rows);
+    const { rows } = await pool.query(`
+      SELECT 
+        c.*, 
+        m.message AS last_reply_message,
+        m.created_at AS last_reply_time
+      FROM contacts c
+      LEFT JOIN LATERAL (
+        SELECT message, created_at 
+        FROM messages 
+        WHERE contact_id = c.id AND type = 'reply'
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) m ON TRUE
+      ORDER BY c.created_at DESC
+    `);
+
+    // Format waktu ke zona WITA
+    const formatted = rows.map((r) => ({
+      ...r,
+      last_reply_time: r.last_reply_time
+        ? new Intl.DateTimeFormat("id-ID", {
+            timeZone: "Asia/Makassar",
+            dateStyle: "short",
+            timeStyle: "short",
+          })
+            .format(new Date(r.last_reply_time))
+            .replace(".", ":") + " WITA"
+        : null,
+    }));
+
+    res.json(formatted);
   } catch (err) {
     console.error("❌ Error ambil kontak:", err.message);
     res.status(500).json({ success: false, message: "Gagal ambil data kontak." });

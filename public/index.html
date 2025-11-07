@@ -445,21 +445,26 @@ Terimakasih atas perhatiannya. <br> Salam Sehat Selalu 😇🙏</textarea>
 </footer>
 
   </div>
-  <script>
-// 🔹 Format waktu ke zona Bali (WITA)
+ <script>
+// 🔹 Format waktu ke zona Bali (WITA) dengan format "07 Nov 2025 14:27 WITA"
 function formatBaliTime(utcString) {
   if (!utcString) return '-';
   const date = new Date(utcString);
-  return date.toLocaleString('id-ID', {
+
+  const formatted = date.toLocaleString('id-ID', {
     timeZone: 'Asia/Makassar',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
-  }).replace('.', '') + ' WITA';
+    minute: '2-digit',
+  });
+
+  // Ganti titik (.) menjadi titik dua (:) agar jam seperti "14:27"
+  return formatted.replace('.', ':') + ' WITA';
 }
 </script>
+
 
 
   <script>
