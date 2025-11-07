@@ -233,36 +233,61 @@ cron.schedule("0 * * * *", async () => {
 });
 
 // =============================
-// 📩 Webhook Fonnte (balasan pasien)
+// 📩 Webhook Fonnte → Balasan User
 // =============================
 app.post("/webhook/fonnte", async (req, res) => {
   try {
-    const { phone, message } = req.body;
-    if (!phone || !message) return res.sendStatus(400);
+    const data = req.body;
+    console.log("📬 Webhook Fonnte diterima:", data);
+
+    const { phone, message } = data;
     const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) return res.status(400).send("Nomor tidak valid");
 
-    const { rows } = await pool.query("SELECT id FROM contacts WHERE phone=$1 LIMIT 1", [normalizedPhone]);
-    if (rows.length === 0) return res.sendStatus(200);
-    const contactId = rows[0].id;
-
-    await pool.query(
-      `INSERT INTO messages (contact_id, type, message, created_at)
-       VALUES ($1, 'reply', $2, NOW())`,
-      [contactId, message]
+    // 🔹 Cari contact_id berdasar nomor hp
+    const { rows: contactRows } = await pool.query(
+      "SELECT id FROM contacts WHERE phone = $1 LIMIT 1",
+      [normalizedPhone]
     );
+    if (contactRows.length === 0) {
+      console.log("⚠️ Nomor belum terdaftar:", normalizedPhone);
+      return res.status(404).send("Nomor tidak ditemukan");
+    }
 
+    const contactId = contactRows[0].id;
+
+    // 🔹 Update tabel contacts → ubah status ke 'replied'
     await pool.query(
-      `UPDATE contacts SET status='replied', last_reply=NOW() WHERE id=$1`,
+      `UPDATE contacts 
+       SET status = 'replied', 
+           last_reply = NOW() 
+       WHERE id = $1`,
       [contactId]
     );
 
-    console.log(`💬 Balasan dari ${normalizedPhone}: "${message}"`);
+    // 🔹 Update atau timpa message terakhir berdasarkan contact_id
+    const { rowCount } = await pool.query(
+      "UPDATE messages SET message = $1, fonnte_response = '{}', created_at = NOW() WHERE contact_id = $2 AND type = 'reply'",
+      [message, contactId]
+    );
+
+    if (rowCount === 0) {
+      // kalau belum ada balasan sebelumnya → buat baru
+      await pool.query(
+        `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
+         VALUES ($1, 'reply', $2, '{}', NOW())`,
+        [contactId, message]
+      );
+    }
+
+    console.log(`💬 Balasan disimpan untuk contact_id=${contactId}: "${message}"`);
     res.sendStatus(200);
   } catch (err) {
     console.error("❌ Error webhook Fonnte:", err.message);
-    res.sendStatus(500);
+    res.status(500).send("Internal Server Error");
   }
 });
+
 
 // =============================
 // 📋 API Kontak (dengan balasan terakhir)
