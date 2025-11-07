@@ -46,12 +46,6 @@ const pool = new Pool({
 })();
 
 // =============================
-// 📁 Setup Upload Folder
-// =============================
-if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
-const upload = multer({ dest: "uploads/" });
-
-// =============================
 // ☎️ Normalisasi Nomor HP
 // =============================
 function normalizePhone(phone) {
@@ -61,6 +55,12 @@ function normalizePhone(phone) {
   else if (!p.startsWith("62")) p = "62" + p;
   return p.length < 10 ? null : p;
 }
+
+// =============================
+// 📁 Setup Upload Folder
+// =============================
+if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
+const upload = multer({ dest: "uploads/" });
 
 // =============================
 // 📤 Upload Excel → Simpan ke DB
@@ -144,19 +144,17 @@ app.post("/api/send", async (req, res) => {
           });
 
           if (resp.data.status) {
-            // 🧹 Hapus pesan lama contact_id ini agar tidak menumpuk
-            await pool.query("DELETE FROM messages WHERE contact_id = $1", [c.id]);
-
-            // Simpan pesan baru
-            await pool.query(
-              `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
-               VALUES ($1, 'initial', $2, $3, NOW())`,
-              [c.id, msg, JSON.stringify(resp.data)]
-            );
-
             await pool.query(
               `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
               [reminder_template, c.id]
+            );
+
+            await pool.query(
+              `INSERT INTO messages (contact_id, type, message, fonnte_response, created_at)
+               VALUES ($1, 'initial', $2, $3, NOW())
+               ON CONFLICT (contact_id) DO UPDATE
+               SET message = EXCLUDED.message, fonnte_response = EXCLUDED.fonnte_response, created_at = NOW()`,
+              [c.id, msg, JSON.stringify(resp.data)]
             );
 
             console.log(`✅ Terkirim ke ${c.name}`);
@@ -186,36 +184,41 @@ app.post("/api/send", async (req, res) => {
 });
 
 // =============================
-// 📩 Webhook Fonnte → Balasan User
+// 📩 Webhook Fonnte → Balasan Pasien
 // =============================
 app.post("/webhook/fonnte", async (req, res) => {
   try {
     const { phone, message } = req.body;
+    console.log("📬 Webhook Fonnte diterima:", req.body);
+
     const normalizedPhone = normalizePhone(phone);
     if (!normalizedPhone) return res.status(400).send("Nomor tidak valid");
 
     const { rows } = await pool.query("SELECT id FROM contacts WHERE phone=$1 LIMIT 1", [normalizedPhone]);
-    if (rows.length === 0) return res.status(404).send("Nomor tidak ditemukan");
+    if (rows.length === 0) {
+      console.log("⚠️ Nomor tidak terdaftar:", normalizedPhone);
+      return res.status(404).send("Nomor tidak ditemukan");
+    }
 
     const contactId = rows[0].id;
 
-    // 🧹 Hapus pesan reply lama (jika ada)
-    await pool.query("DELETE FROM messages WHERE contact_id = $1 AND type = 'reply'", [contactId]);
+    // 🔹 Hapus balasan sebelumnya agar hanya 1 row per contact
+    await pool.query("DELETE FROM reply WHERE contact_id=$1", [contactId]);
 
-    // Simpan pesan baru dari pasien
+    // 🔹 Simpan balasan baru
     await pool.query(
-      `INSERT INTO messages (contact_id, type, message, created_at)
-       VALUES ($1, 'reply', $2, NOW())`,
-      [contactId, message]
+      `INSERT INTO reply (contact_id, phone, message, created_at)
+       VALUES ($1, $2, $3, NOW())`,
+      [contactId, normalizedPhone, message]
     );
 
-    // Update status kontak jadi replied
+    // 🔹 Update status di contacts
     await pool.query(
       `UPDATE contacts SET status='replied', last_reply=NOW() WHERE id=$1`,
       [contactId]
     );
 
-    console.log(`💬 Balasan disimpan untuk contact_id=${contactId}: "${message}"`);
+    console.log(`💬 Balasan masuk dari ${normalizedPhone}: "${message}"`);
     res.sendStatus(200);
   } catch (err) {
     console.error("❌ Error webhook:", err.message);
@@ -224,17 +227,17 @@ app.post("/webhook/fonnte", async (req, res) => {
 });
 
 // =============================
-// 📋 API Kontak
+// 📋 API Kontak (termasuk balasan terakhir)
 // =============================
 app.get("/api/contacts", async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT c.*,
              (
-               SELECT m.message 
-               FROM messages m 
-               WHERE m.contact_id = c.id AND m.type = 'reply'
-               ORDER BY m.created_at DESC 
+               SELECT r.message 
+               FROM reply r 
+               WHERE r.contact_id = c.id 
+               ORDER BY r.created_at DESC 
                LIMIT 1
              ) AS last_reply_message
       FROM contacts c
