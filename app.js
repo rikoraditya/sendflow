@@ -235,7 +235,8 @@ cron.schedule("0 * * * *", async () => {
 // =============================
 // 📩 Webhook Fonnte → Balasan Pasien
 // =============================
-app.post("/webhook/fonnte", (req, res) => {
+// ✅ Sekarang bisa menerima /webhook/fonnte dan //webhook/fonnte
+app.post(["/webhook/fonnte", "//webhook/fonnte"], (req, res) => {
   // ✅ Kirim respon cepat biar Fonnte tidak timeout
   res.status(200).json({ success: true, message: "Webhook diterima" });
 
@@ -285,12 +286,6 @@ app.post("/webhook/fonnte", (req, res) => {
       console.error("❌ Error webhook async:", err.message);
     }
   })();
-});
-
-// -- tambahan: terima GET agar Test API dari dashboard tidak 404
-app.get("/webhook/fonnte", (req, res) => {
-  console.log("🔍 GET webhook/fonnte test diterima:", { query: req.query, headers: req.headers });
-  res.status(200).json({ success: true, message: "Webhook GET aktif" });
 });
 
 // =============================
