@@ -287,6 +287,12 @@ app.post("/webhook/fonnte", (req, res) => {
   })();
 });
 
+// -- tambahan: terima GET agar Test API dari dashboard tidak 404
+app.get("/webhook/fonnte", (req, res) => {
+  console.log("🔍 GET webhook/fonnte test diterima:", { query: req.query, headers: req.headers });
+  res.status(200).json({ success: true, message: "Webhook GET aktif" });
+});
+
 // =============================
 // 📋 API Kontak (termasuk balasan terakhir)
 // =============================
