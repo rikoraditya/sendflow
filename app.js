@@ -237,7 +237,7 @@ cron.schedule("0 * * * *", async () => {
 // =============================
 app.post("/webhook/fonnte", (req, res) => {
   // ✅ Kirim respon cepat biar Fonnte tidak timeout
-  res.sendStatus(200);
+  res.status(200).json({ success: true, message: "Webhook diterima" });
 
   console.log("📩 HEADER:", req.headers);
   console.log("📩 BODY:", req.body);
