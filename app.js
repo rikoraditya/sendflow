@@ -88,7 +88,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       await pool.query(
         `
         INSERT INTO contacts (nik, name, phone, status, reminder_count, created_at)
-        VALUES ($1, $2, $3, 'pending', 0, NOW())
+        VALUES ($1, $2, $3, 'pending', 0, NOW() AT TIME ZONE 'Asia/Makassar')
         ON CONFLICT (nik) DO UPDATE 
         SET name = EXCLUDED.name,
             phone = EXCLUDED.phone,
@@ -154,7 +154,7 @@ app.post("/api/send", async (req, res) => {
 
           if (resp.data.status) {
             await pool.query(
-              `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
+              `UPDATE contacts SET status='sent', last_sent=NOW() AT TIME ZONE 'Asia/Makassar', reminder_message=$1 WHERE id=$2`,
               [reminder_template, c.id]
             );
             console.log(`✅ Terkirim ke ${c.name}`);
@@ -216,7 +216,7 @@ cron.schedule("0 * * * *", async () => {
         });
 
         await pool.query(
-          `UPDATE contacts SET status='reminded', reminder_count = reminder_count + 1, last_sent=NOW() WHERE id=$1`,
+          `UPDATE contacts SET status='reminded', reminder_count = reminder_count + 1, last_sent=NOW() AT TIME ZONE 'Asia/Makassar' WHERE id=$1`,
           [c.id]
         );
 
@@ -235,57 +235,50 @@ cron.schedule("0 * * * *", async () => {
 // =============================
 // 📩 Webhook Fonnte → Balasan Pasien
 // =============================
-// ✅ Sekarang bisa menerima /webhook/fonnte dan //webhook/fonnte
-app.post(["/webhook/fonnte", "//webhook/fonnte"], (req, res) => {
-  // ✅ Kirim respon cepat biar Fonnte tidak timeout
+// ✅ Sekarang menangani /webhook/fonnte dan //webhook/fonnte
+app.post(["/webhook/fonnte", "//webhook/fonnte"], async (req, res) => {
   res.status(200).json({ success: true, message: "Webhook diterima" });
-
-  console.log("📩 HEADER:", req.headers);
-  console.log("📩 BODY:", req.body);
 
   const data = req.body;
   const phone = data.phone || data.sender;
   const message = data.message || "";
 
+  console.log("📩 HEADER:", req.headers);
+  console.log("📩 BODY:", data);
+
   fs.appendFileSync(
     path.join(__dirname, "webhook.log"),
-    `[${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })}] ${JSON.stringify(
-      data,
-      null,
-      2
-    )}\n\n`
+    `[${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })}] ${JSON.stringify(data, null, 2)}\n\n`
   );
 
-  (async () => {
-    try {
-      if (!phone || !message) return;
-      const normalizedPhone = normalizePhone(phone);
-      if (!normalizedPhone) return;
+  try {
+    if (!phone || !message) return;
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) return;
 
-      const { rows } = await pool.query(
-        "SELECT id FROM contacts WHERE phone=$1 LIMIT 1",
-        [normalizedPhone]
-      );
-      if (rows.length === 0) return;
-
-      const contactId = rows[0].id;
-
-      await pool.query(
-        `INSERT INTO reply (contact_id, phone, message, created_at)
-         VALUES ($1, $2, $3, NOW())`,
-        [contactId, normalizedPhone, message]
-      );
-
-      await pool.query(
-        `UPDATE contacts SET status='replied', last_reply=NOW() WHERE id=$1`,
-        [contactId]
-      );
-
-      console.log(`💬 Balasan masuk dari ${normalizedPhone}: "${message}"`);
-    } catch (err) {
-      console.error("❌ Error webhook async:", err.message);
+    const { rows } = await pool.query("SELECT id FROM contacts WHERE phone=$1 LIMIT 1", [normalizedPhone]);
+    if (rows.length === 0) {
+      console.log(`⚠️ Nomor ${normalizedPhone} belum terdaftar di contacts`);
+      return;
     }
-  })();
+
+    const contactId = rows[0].id;
+
+    await pool.query(
+      `INSERT INTO reply (contact_id, phone, message, created_at)
+       VALUES ($1, $2, $3, NOW() AT TIME ZONE 'Asia/Makassar')`,
+      [contactId, normalizedPhone, message]
+    );
+
+    await pool.query(
+      `UPDATE contacts SET status='replied', last_reply=NOW() AT TIME ZONE 'Asia/Makassar' WHERE id=$1`,
+      [contactId]
+    );
+
+    console.log(`💬 Balasan masuk dari ${normalizedPhone}: "${message}"`);
+  } catch (err) {
+    console.error("❌ Error webhook async:", err.message);
+  }
 });
 
 // =============================
