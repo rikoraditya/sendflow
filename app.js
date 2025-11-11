@@ -19,7 +19,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// ✅ Tambahan penting agar Fonnte webhook terbaca (x-www-form-urlencoded)
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 app.use(express.static(path.join(__dirname, "public")));
 
 // =============================
@@ -229,52 +233,54 @@ cron.schedule("0 * * * *", async () => {
 // =============================
 // 📩 Webhook Fonnte → Balasan Pasien
 // =============================
-app.post("/webhook/fonnte", async (req, res) => {
-  try {
-    const data = req.body;
-    const phone = data.phone || data.sender;
-    const message = data.message || "";
+app.post("/webhook/fonnte", (req, res) => {
+  // ✅ Langsung kirim respons agar tidak timeout
+  res.sendStatus(200);
 
-    fs.appendFileSync(
-      path.join(__dirname, "webhook.log"),
-      `[${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })}] ${JSON.stringify(
-        data,
-        null,
-        2
-      )}\n\n`
-    );
+  const data = req.body;
+  const phone = data.phone || data.sender;
+  const message = data.message || "";
 
-    if (!phone || !message) return res.sendStatus(200);
+  fs.appendFileSync(
+    path.join(__dirname, "webhook.log"),
+    `[${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })}] ${JSON.stringify(
+      data,
+      null,
+      2
+    )}\n\n`
+  );
 
-    const normalizedPhone = normalizePhone(phone);
-    if (!normalizedPhone) return res.status(400).send("Nomor tidak valid");
+  (async () => {
+    try {
+      if (!phone || !message) return;
+      const normalizedPhone = normalizePhone(phone);
+      if (!normalizedPhone) return;
 
-    const { rows } = await pool.query(
-      "SELECT id FROM contacts WHERE phone=$1 LIMIT 1",
-      [normalizedPhone]
-    );
-    if (rows.length === 0) return res.sendStatus(200);
+      const { rows } = await pool.query(
+        "SELECT id FROM contacts WHERE phone=$1 LIMIT 1",
+        [normalizedPhone]
+      );
+      if (rows.length === 0) return;
 
-    const contactId = rows[0].id;
+      const contactId = rows[0].id;
 
-    await pool.query("DELETE FROM reply WHERE contact_id=$1", [contactId]);
-    await pool.query(
-      `INSERT INTO reply (contact_id, phone, message, created_at)
-       VALUES ($1, $2, $3, NOW())`,
-      [contactId, normalizedPhone, message]
-    );
+      await pool.query("DELETE FROM reply WHERE contact_id=$1", [contactId]);
+      await pool.query(
+        `INSERT INTO reply (contact_id, phone, message, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [contactId, normalizedPhone, message]
+      );
 
-    await pool.query(
-      `UPDATE contacts SET status='replied', last_reply=NOW() WHERE id=$1`,
-      [contactId]
-    );
+      await pool.query(
+        `UPDATE contacts SET status='replied', last_reply=NOW() WHERE id=$1`,
+        [contactId]
+      );
 
-    console.log(`💬 Balasan masuk dari ${normalizedPhone}: "${message}"`);
-    res.sendStatus(200);
-  } catch (err) {
-    console.error("❌ Error webhook:", err.message);
-    res.status(500).send("Internal Server Error");
-  }
+      console.log(`💬 Balasan masuk dari ${normalizedPhone}: "${message}"`);
+    } catch (err) {
+      console.error("❌ Error webhook async:", err.message);
+    }
+  })();
 });
 
 // =============================
