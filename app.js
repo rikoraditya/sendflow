@@ -12,6 +12,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import pkg from "pg";
+import bodyParser from "body-parser"; // ✅ Tambahan penting
 
 dotenv.config();
 const { Pool } = pkg;
@@ -20,9 +21,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ Tambahan penting agar Fonnte webhook terbaca (x-www-form-urlencoded)
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ✅ Gunakan body-parser agar semua format request bisa terbaca (JSON, text, urlencoded)
+app.use(bodyParser.json({ limit: "2mb" }));
+app.use(bodyParser.urlencoded({ extended: true, limit: "2mb" }));
+app.use(bodyParser.text({ type: "*/json" }));
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -163,7 +165,7 @@ app.post("/api/send", async (req, res) => {
           console.log(`⚠️ Gagal kirim ke ${c.phone}: ${err.message}`);
         }
 
-        await new Promise((r) => setTimeout(r, 2000)); // jeda antar pesan
+        await new Promise((r) => setTimeout(r, 2000));
       }
 
       batchIndex++;
@@ -185,7 +187,7 @@ app.post("/api/send", async (req, res) => {
 });
 
 // =============================
-// 🔁 Reminder Otomatis Tiap Jam (24 jam setelah pesan dikirim)
+// 🔁 Reminder Otomatis Tiap Jam
 // =============================
 cron.schedule("0 * * * *", async () => {
   try {
@@ -234,8 +236,11 @@ cron.schedule("0 * * * *", async () => {
 // 📩 Webhook Fonnte → Balasan Pasien
 // =============================
 app.post("/webhook/fonnte", (req, res) => {
-  // ✅ Langsung kirim respons agar tidak timeout
+  // ✅ Kirim respon cepat biar Fonnte tidak timeout
   res.sendStatus(200);
+
+  console.log("📩 HEADER:", req.headers);
+  console.log("📩 BODY:", req.body);
 
   const data = req.body;
   const phone = data.phone || data.sender;
@@ -264,7 +269,6 @@ app.post("/webhook/fonnte", (req, res) => {
 
       const contactId = rows[0].id;
 
-      await pool.query("DELETE FROM reply WHERE contact_id=$1", [contactId]);
       await pool.query(
         `INSERT INTO reply (contact_id, phone, message, created_at)
          VALUES ($1, $2, $3, NOW())`,
