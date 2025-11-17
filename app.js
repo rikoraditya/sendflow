@@ -298,6 +298,112 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// ======================================================
+// 🟦 SETUP POSTGRESQL CONNECTION
+// ======================================================
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+// ======================================================
+// 🟦 MULTER (UPLOAD EXCEL)
+// ======================================================
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 5 * 1024 * 1024 }, // max 5 MB
+});
+
+// ======================================================
+// 🟦 NORMALISASI NOMOR HP
+// ======================================================
+function normalizePhone(phone) {
+  if (!phone) return null;
+  phone = phone.toString().trim();
+
+  // contoh: 62812345678 → tetap
+  if (phone.startsWith("62")) return phone;
+  // contoh: 08123 → jadi 628123
+  if (phone.startsWith("0")) return "62" + phone.substring(1);
+  return phone;
+}
+
+// ======================================================
+// 🟦 FUNGSI: AMBIL 5 KONTAK PENDING
+// ======================================================
+async function getPendingContacts(limit = 5) {
+  const q = `
+    SELECT *
+    FROM contacts
+    WHERE status = 'pending'
+    ORDER BY id ASC
+    LIMIT $1
+  `;
+  const { rows } = await pool.query(q, [limit]);
+  return rows;
+}
+
+// ======================================================
+// 🟦 FUNGSI: TANDAI KONTAK SUDAH TERKIRIM
+// ======================================================
+async function markSent(id) {
+  await pool.query(`
+    UPDATE contacts
+    SET status = 'sent',
+        last_sent = NOW() AT TIME ZONE 'Asia/Makassar'
+    WHERE id = $1
+  `, [id]);
+}
+
+// ======================================================
+// 🟦 FUNGSI: KIRIM PESAN FONNTE
+// ======================================================
+async function sendFonnte(phone, message) {
+  try {
+    const form = new FormData();
+    form.append("target", phone);
+    form.append("message", message);
+
+    const response = await axios.post(
+      "https://api.fonnte.com/send",
+      form,
+      { headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() } }
+    );
+
+    return { success: response.data.status === "success" };
+  } catch (err) {
+    console.error("Fonnte error:", err.response?.data || err.message);
+    return { success: false };
+  }
+}
+
+// ======================================================
+// 🟦 LOGGING
+// ======================================================
+function logInfo(msg) {
+  console.log(`[INFO] ${new Date().toLocaleString("id-ID")} — ${msg}`);
+}
+
+function logError(msg) {
+  console.error(`[ERROR] ${new Date().toLocaleString("id-ID")} — ${msg}`);
+}
+
+// ======================================================
+// 🟦 SIMPAN LOG WEBHOOK KE FILE
+// ======================================================
+function appendWebhookLog(data) {
+  try {
+    const logPath = path.join(process.cwd(), "webhook.log");
+    fs.appendFileSync(
+      logPath,
+      `[${new Date().toISOString()}] ${JSON.stringify(data)}\n`
+    );
+  } catch (err) {
+    console.error("Gagal menulis webhook log:", err.message);
+  }
+}
+
+
 // =========================================
 // 🟦 SERVER LISTEN
 // =========================================
