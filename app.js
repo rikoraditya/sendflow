@@ -178,7 +178,7 @@ async function sendFonnte(phone, message) {
 // =========================================
 // 🟩 UPLOAD EXCEL -> INSERT CONTACTS
 // =========================================
-app.post("/upload", upload.single("file"), async (req, res) => {
+app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "Tidak ada file yang diupload" });
