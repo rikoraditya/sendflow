@@ -176,7 +176,7 @@ async function sendFonnte(phone, message) {
 // =======================
 
 // Upload Excel -> insert contacts (name, phone, message optional, delay optional)
-app.post("/upload", upload.single("file"), async (req, res) => {
+app.post("/api/upload", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: "File Excel tidak ditemukan" });
 
   try {
