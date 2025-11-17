@@ -12,17 +12,58 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import pkg from "pg";
+
 dotenv.config();
-
 const { Pool } = pkg;
-
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // =======================
-//  TEMPLATE PESAN
+// INIT APP + MIDDLEWARE
+// =======================
+const app = express();
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" }));
+app.use(express.static(path.join(__dirname, "public")));
+
+// =======================
+// POOL POSTGRES (SUPABASE / RAILWAY)
+// - Supports DATABASE_URL or individual vars
+// =======================
+const poolConfig = process.env.DATABASE_URL
+  ? { connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }
+  : {
+      host: process.env.PGHOST,
+      user: process.env.PGUSER,
+      password: process.env.PGPASSWORD,
+      database: process.env.PGDATABASE,
+      port: process.env.PGPORT ? Number(process.env.PGPORT) : undefined,
+      ssl: { rejectUnauthorized: false },
+    };
+
+const pool = new Pool(poolConfig);
+
+// quick test at startup (non-blocking)
+pool
+  .query("SELECT 1")
+  .then(() => logInfo("✅ Database connected"))
+  .catch((e) => {
+    logError("❌ Database connect failed:", e.message || e);
+    // don't exit here; let app start but many features will fail if DB unreachable
+  });
+
+// =======================
+// MULTER (upload excel)
+// =======================
+const upload = multer({
+  dest: path.join(__dirname, "uploads"),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
+
+// =======================
+// TEMPLATE PESAN
 // =======================
 
-// Template utama
 const TEMPLATE_UTAMA = `
 Selamat Pagi atau Siang
 Yth. Bapak/Ibu {name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan Oktober ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
@@ -32,7 +73,6 @@ Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
 Terima kasih atas perhatiannya🙏
 `.trim();
 
-// Template reminder
 const TEMPLATE_REMINDER = `
 Selamat Pagi atau Siang
 Yth. Bapak/Ibu 
@@ -46,375 +86,281 @@ Jangan lupa jaga pola makan, minum rendah gula serta garam, dan olahraga minimal
 Terimakasih atas perhatiannya. Salam Sehat Selalu 😇🙏
 `.trim();
 
-// ===============================
-// ROUTE: UPLOAD FILE EXCEL
-// ===============================
-app.post("/upload", upload.single("file"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "File Excel tidak ditemukan" });
-  }
-
+// =======================
+// HELPERS: logging, phone normalizer, webhook log
+// =======================
+function logInfo(...args) {
+  console.log("[INFO]", new Date().toLocaleString("id-ID"), ...args);
+}
+function logError(...args) {
+  console.error("[ERROR]", new Date().toLocaleString("id-ID"), ...args);
+}
+function appendWebhookLog(data) {
   try {
-    const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-    const client = await pool.connect();
-
-    await client.query("BEGIN");
-
-    // Kosongkan tabel sebelum import
-    await client.query("DELETE FROM contacts");
-
-    for (const row of data) {
-      await client.query(
-        `INSERT INTO contacts (name, phone, message, delay)
-         VALUES ($1, $2, $3, $4)`,
-        [row.name, row.phone, row.message, row.delay || 5]
-      );
-    }
-
-    await client.query("COMMIT");
-    client.release();
-
-    res.json({ status: "success", message: "Data kontak berhasil diupload" });
-  } catch (err) {
-    console.error("Upload error:", err);
-    res.status(500).json({ error: "Gagal memproses file" });
+    const file = path.join(__dirname, "webhook.log");
+    fs.appendFileSync(file, `[${new Date().toISOString()}] ${JSON.stringify(data)}\n`);
+  } catch (e) {
+    console.error("❌ appendWebhookLog failed:", e.message);
   }
-});
+}
 
-// ===============================
-// CRON JOB — PER BATCH 5 KONTAK
-// ===============================
-cron.schedule("*/1 * * * *", async () => {
-  console.log("⏳ Cron berjalan:", new Date().toLocaleString("id-ID"));
-
-  // Ambil maksimal 5 kontak per batch
-  const contacts = await getPendingContacts(5);
-
-  if (contacts.length === 0) {
-    console.log("✨ Tidak ada kontak pending.");
-    return;
-  }
-
-  console.log(`📤 Batch baru: ${contacts.length} kontak akan dikirim...`);
-
-  for (const c of contacts) {
-    const message = TEMPLATE_UTAMA.replace("{name}", c.name);
-
-    const sent = await sendFonnte(c.phone, message);
-
-    if (sent.success) {
-      await markSent(c.id);
-      console.log(`✅ Terkirim ke ${c.name} (${c.phone})`);
-    } else {
-      console.log(`❌ Gagal kirim ke ${c.name}`);
-    }
-
-    // Jeda antar kontak 5 detik
-    console.log("⏳ Delay 5 detik sebelum kontak berikutnya...");
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-
-  // Jeda batch 10 menit
-  console.log("⏳ Menunggu 10 menit sebelum batch selanjutnya...");
-  await new Promise((r) => setTimeout(r, 10 * 60 * 1000));
-});
-
-// =========================================
-// 🟦 CRON REMINDER SETIAP JAM 8 PAGI
-// =========================================
-cron.schedule("0 8 * * *", async () => {
-  logInfo("🔔 Cron reminder berjalan...");
-
-  const q = `
-    SELECT * FROM contacts
-    WHERE status = 'sent'
-      AND reminder_count < 1
-      AND (NOW() AT TIME ZONE 'Asia/Makassar') - last_sent > INTERVAL '3 days'
-  `;
-  const { rows } = await pool.query(q);
-
-  if (rows.length === 0) {
-    logInfo("✨ Tidak ada kontak untuk reminder.");
-    return;
-  }
-
-  logInfo(`🔔 Mengirim reminder ke ${rows.length} kontak...`);
-
-  for (const c of rows) {
-    const sent = await sendFonnte(c.phone, TEMPLATE_REMINDER);
-
-    if (sent.success) {
-      await pool.query(
-        `UPDATE contacts SET reminder_count = reminder_count + 1 WHERE id = $1`,
-        [c.id]
-      );
-      logInfo(`🔔 Reminder terkirim ke ${c.name}`);
-    } else {
-      logError(`❌ Reminder gagal ke ${c.name}`);
-    }
-
-    // Jeda aman antar kontak reminder
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-});
-
-
-// =========================================
-// 🟦 CRON: KIRIM KONTAK PER BATCH
-//    - Setiap 10 menit jalan
-//    - 1 batch = 5 kontak
-//    - Delay antar kontak = 5 detik
-// =========================================
-cron.schedule("*/10 * * * *", async () => {
-  logInfo("⏳ Cron pengiriman berjalan (batch 5 setiap 10 menit)...");
-
-  const contacts = await getPendingContacts(5); // ambil 5 saja
-  if (contacts.length === 0) {
-    logInfo("✨ Tidak ada kontak pending.");
-    return;
-  }
-
-  logInfo(`📤 Mengirim batch: ${contacts.length} kontak...`);
-
-  for (const c of contacts) {
-    const message = TEMPLATE_UTAMA.replace("{name}", c.name);
-    const sent = await sendFonnte(c.phone, message);
-
-    if (sent.success) {
-      await markSent(c.id);
-      logInfo(`✅ Terkirim ke ${c.name} (${c.phone})`);
-    } else {
-      logError(`❌ Gagal kirim ke ${c.name}`);
-    }
-
-    // Delay antar kontak 5 detik
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-
-  logInfo("⏳ Batch selesai. Menunggu cron berikutnya 10 menit...");
-});
-
-// =========================================
-// 🟦 CRON REMINDER: KIRIM SETELAH 24 JAM
-//    - Cek setiap 30 menit
-//    - Kirim reminder ke kontak yang:
-//        ✔ status = 'sent'
-//        ✔ belum pernah reply (last_reply IS NULL)
-//        ✔ lebih dari 24 jam sejak last_sent
-// =========================================
-cron.schedule("*/30 * * * *", async () => {
-  logInfo("🔔 Cron reminder 24 jam berjalan...");
-
-  const q = `
-    SELECT *
-    FROM contacts
-    WHERE status = 'sent'
-      AND reminder_count < 1
-      AND last_reply IS NULL
-      AND (NOW() AT TIME ZONE 'Asia/Makassar') - last_sent > INTERVAL '24 hours'
-    ORDER BY last_sent ASC
-  `;
-
-  const { rows } = await pool.query(q);
-
-  if (rows.length === 0) {
-    logInfo("✨ Tidak ada yang perlu dikirim reminder.");
-    return;
-  }
-
-  logInfo(`🔔 Mengirim reminder untuk ${rows.length} kontak...`);
-
-  for (const c of rows) {
-    const sent = await sendFonnte(c.phone, TEMPLATE_REMINDER);
-
-    if (sent.success) {
-      await pool.query(`
-        UPDATE contacts
-        SET reminder_count = reminder_count + 1
-        WHERE id = $1
-      `, [c.id]);
-
-      logInfo(`🔔 Reminder terkirim ke ${c.name} (${c.phone})`);
-    } else {
-      logError(`❌ Reminder gagal ke ${c.name}`);
-    }
-
-    // delay 5 detik antar kontak kiriman reminder
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-});
-
-// =========================================
-// 🟦 WEBHOOK FONNTE (BALASAN MASUK)
-// =========================================
-app.post("/webhook", async (req, res) => {
-  appendWebhookLog(req.body);
-
-  try {
-    const body = req.body;
-
-    // Fonnte MUST send type = 'incoming'
-    if (!body || body.type !== "incoming") {
-      logInfo("Webhook diterima, tetapi bukan incoming WA.");
-      return res.json({ success: false });
-    }
-
-    const phone = normalizePhone(body.sender);
-    const message = body.message || body.text || "";
-    const timestamp = new Date().toISOString();
-
-    if (!phone || !message) {
-      logError("Webhook error: nomor atau pesan kosong.");
-      return res.json({ success: false });
-    }
-
-    // Simpan ke tabel incoming_messages
-    await pool.query(
-      `
-      INSERT INTO incoming_messages (phone, message, received_at)
-      VALUES ($1, $2, NOW() AT TIME ZONE 'Asia/Makassar')
-    `,
-      [phone, message]
-    );
-
-    // Update kontak: berarti dia sudah balas
-    await pool.query(
-      `
-      UPDATE contacts
-      SET last_reply = NOW() AT TIME ZONE 'Asia/Makassar',
-          status = 'replied'
-      WHERE phone = $1
-    `,
-      [phone]
-    );
-
-    logInfo(`📥 Pesan masuk dari ${phone}: ${message}`);
-
-    res.json({ success: true });
-  } catch (err) {
-    logError("❌ Webhook error:", err.message);
-    res.status(500).json({ success: false });
-  }
-});
-
-// ======================================================
-// 🟦 SETUP POSTGRESQL CONNECTION
-// ======================================================
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
-// ======================================================
-// 🟦 MULTER (UPLOAD EXCEL)
-// ======================================================
-const upload = multer({
-  dest: "uploads/",
-  limits: { fileSize: 5 * 1024 * 1024 }, // max 5 MB
-});
-
-// ======================================================
-// 🟦 NORMALISASI NOMOR HP
-// ======================================================
 function normalizePhone(phone) {
   if (!phone) return null;
-  phone = phone.toString().trim();
-
-  // contoh: 62812345678 → tetap
-  if (phone.startsWith("62")) return phone;
-  // contoh: 08123 → jadi 628123
-  if (phone.startsWith("0")) return "62" + phone.substring(1);
-  return phone;
+  let p = String(phone).trim().replace(/\D/g, "");
+  if (p.startsWith("0")) p = "62" + p.slice(1);
+  else if (!p.startsWith("62")) p = "62" + p;
+  return p.length >= 9 ? p : null;
 }
 
-// ======================================================
-// 🟦 FUNGSI: AMBIL 5 KONTAK PENDING
-// ======================================================
+// =======================
+// DB helpers
+// =======================
 async function getPendingContacts(limit = 5) {
-  const q = `
-    SELECT *
-    FROM contacts
-    WHERE status = 'pending'
-    ORDER BY id ASC
-    LIMIT $1
-  `;
-  const { rows } = await pool.query(q, [limit]);
-  return rows;
+  try {
+    const q = `
+      SELECT * FROM contacts
+      WHERE status = 'pending'
+      ORDER BY created_at ASC, id ASC
+      LIMIT $1
+    `;
+    const { rows } = await pool.query(q, [limit]);
+    return rows || [];
+  } catch (err) {
+    logError("getPendingContacts error:", err.message || err);
+    return [];
+  }
 }
 
-// ======================================================
-// 🟦 FUNGSI: TANDAI KONTAK SUDAH TERKIRIM
-// ======================================================
 async function markSent(id) {
-  await pool.query(`
-    UPDATE contacts
-    SET status = 'sent',
-        last_sent = NOW() AT TIME ZONE 'Asia/Makassar'
-    WHERE id = $1
-  `, [id]);
+  try {
+    await pool.query(
+      `UPDATE contacts
+       SET status = 'sent',
+           last_sent = NOW() AT TIME ZONE 'Asia/Makassar'
+       WHERE id = $1`,
+      [id]
+    );
+  } catch (err) {
+    logError("markSent error:", err.message || err);
+  }
 }
 
-// ======================================================
-// 🟦 FUNGSI: KIRIM PESAN FONNTE
-// ======================================================
+// =======================
+// Sender: Fonnte API
+// =======================
 async function sendFonnte(phone, message) {
   try {
     const form = new FormData();
     form.append("target", phone);
     form.append("message", message);
 
-    const response = await axios.post(
-      "https://api.fonnte.com/send",
-      form,
-      { headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() } }
-    );
+    const resp = await axios.post("https://api.fonnte.com/send", form, {
+      headers: { Authorization: process.env.FONNTE_TOKEN || "", ...form.getHeaders() },
+      timeout: 30000,
+    });
 
-    return { success: response.data.status === "success" };
+    logInfo("Fonnte response:", resp.data);
+    // adapt to fonnte response shape — treat truthy status/success as success
+    const ok =
+      resp.data &&
+      (resp.data.status === true || resp.data.status === "success" || resp.data.success === true);
+    return { success: Boolean(ok), raw: resp.data };
   } catch (err) {
-    console.error("Fonnte error:", err.response?.data || err.message);
-    return { success: false };
+    logError("sendFonnte error:", err.response?.data || err.message);
+    return { success: false, raw: err.response?.data || err.message };
   }
 }
 
-// ======================================================
-// 🟦 LOGGING
-// ======================================================
-function logInfo(msg) {
-  console.log(`[INFO] ${new Date().toLocaleString("id-ID")} — ${msg}`);
-}
+// =======================
+// ROUTES
+// =======================
 
-function logError(msg) {
-  console.error(`[ERROR] ${new Date().toLocaleString("id-ID")} — ${msg}`);
-}
+// Upload Excel -> insert contacts (name, phone, message optional, delay optional)
+app.post("/upload", upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: "File Excel tidak ditemukan" });
 
-// ======================================================
-// 🟦 SIMPAN LOG WEBHOOK KE FILE
-// ======================================================
-function appendWebhookLog(data) {
   try {
-    const logPath = path.join(process.cwd(), "webhook.log");
-    fs.appendFileSync(
-      logPath,
-      `[${new Date().toISOString()}] ${JSON.stringify(data)}\n`
-    );
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Insert or upsert: use nik if exists else name+phone uniqueness
+      for (const r of rows) {
+        const name = (r.name || r.nama || r.nama_lengkap || "").toString().trim();
+        const phoneRaw = r.phone || r.hp || r["No WA"] || r.no_wa || "";
+        const phone = normalizePhone(phoneRaw);
+        if (!name || !phone) {
+          logInfo("Skip invalid row:", { name, phoneRaw });
+          continue;
+        }
+        // Upsert by phone (or you can change to nik unique)
+        await client.query(
+          `INSERT INTO contacts (name, phone, message, status, reminder_count, created_at)
+           VALUES ($1,$2,$3,'pending',0, NOW() AT TIME ZONE 'Asia/Makassar')
+           ON CONFLICT (phone) DO UPDATE
+           SET name = EXCLUDED.name,
+               message = COALESCE(EXCLUDED.message, contacts.message),
+               status = 'pending',
+               reminder_count = 0,
+               last_sent = NULL,
+               last_reply = NULL`,
+          [name, phone, (r.message || "").toString().trim()]
+        );
+      }
+      await client.query("COMMIT");
+      res.json({ success: true, message: "Upload & simpan kontak berhasil" });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+      // cleanup uploaded file
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {}
+    }
   } catch (err) {
-    console.error("Gagal menulis webhook log:", err.message);
+    logError("Upload handler error:", err.message || err);
+    res.status(500).json({ success: false, message: "Gagal memproses file" });
   }
-}
+});
 
+// Webhook Fonnte - receive incoming messages
+app.post("/webhook", async (req, res) => {
+  appendWebhookLog(req.body);
+  try {
+    const body = req.body || {};
+    // Accept flexible shapes; many providers send different keys
+    const type = body.type || body.event || null;
+    if (type && type !== "incoming" && type !== "message" && body.type !== undefined) {
+      // if provider uses explicit type and not incoming -> ignore
+      return res.json({ success: true, note: "ignored (not incoming)" });
+    }
 
-// =========================================
-// 🟦 SERVER LISTEN
-// =========================================
+    // try common fields
+    const phoneRaw = body.phone || body.sender || body.from || body.phone_number || body.whatsapp;
+    const phone = normalizePhone(phoneRaw);
+    const message = body.message || body.text || (body.body && body.body.text) || "";
+
+    if (!phone || !message) {
+      logInfo("Webhook ignored: missing phone or message", { phoneRaw, message });
+      return res.json({ success: false, message: "missing phone/message" });
+    }
+
+    // save incoming
+    await pool.query(
+      `INSERT INTO incoming_messages (phone, message, received_at)
+       VALUES ($1, $2, NOW() AT TIME ZONE 'Asia/Makassar')`,
+      [phone, message]
+    );
+
+    // update contact if exists
+    await pool.query(
+      `UPDATE contacts
+       SET last_reply = NOW() AT TIME ZONE 'Asia/Makassar',
+           status = 'replied'
+       WHERE phone = $1`,
+      [phone]
+    );
+
+    logInfo(`Received reply from ${phone}: ${message}`);
+    res.json({ success: true });
+  } catch (err) {
+    logError("Webhook handler error:", err.message || err);
+    res.status(500).json({ success: false });
+  }
+});
+
+// Simple health check
+app.get("/health", (req, res) => res.json({ ok: true }));
+
+// =======================
+// CRON: Send batch every 10 minutes (batch size 5, delay 5 sec)
+// =======================
+cron.schedule("*/10 * * * *", async () => {
+  logInfo("Cron batch started: fetching pending contacts...");
+  try {
+    const contacts = await getPendingContacts(5);
+    if (!contacts || contacts.length === 0) {
+      logInfo("No pending contacts.");
+      return;
+    }
+    logInfo(`Will send ${contacts.length} contacts in this batch.`);
+
+    for (const c of contacts) {
+      const msg = TEMPLATE_UTAMA.replace("{name}", c.name || "");
+      const result = await sendFonnte(c.phone, msg);
+
+      if (result.success) {
+        await markSent(c.id);
+        logInfo(`Sent to ${c.name} (${c.phone})`);
+      } else {
+        logError(`Failed send to ${c.name} (${c.phone})`, result.raw);
+        // keep status 'pending' or mark 'failed' based on policy (we leave as pending to retry)
+        await pool.query(`UPDATE contacts SET status='failed' WHERE id=$1`, [c.id]).catch(() => {});
+      }
+
+      // delay between messages
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+
+    logInfo("Batch finished.");
+  } catch (err) {
+    logError("Cron batch error:", err.message || err);
+  }
+});
+
+// =======================
+// CRON: Reminder check every 30 minutes -> send if >24h since last_sent and no reply
+// - limit reminders per contact to 1 (reminder_count < 1)
+// =======================
+cron.schedule("*/30 * * * *", async () => {
+  logInfo("Cron reminder: checking candidates...");
+  try {
+    const q = `
+      SELECT * FROM contacts
+      WHERE status = 'sent'
+        AND reminder_count < 1
+        AND last_reply IS NULL
+        AND (NOW() AT TIME ZONE 'Asia/Makassar') - last_sent > INTERVAL '24 hours'
+      ORDER BY last_sent ASC
+      LIMIT 50
+    `;
+    const { rows } = await pool.query(q);
+    if (!rows || rows.length === 0) {
+      logInfo("No reminder candidates.");
+      return;
+    }
+
+    for (const c of rows) {
+      const resSend = await sendFonnte(c.phone, TEMPLATE_REMINDER);
+      if (resSend.success) {
+        await pool.query(`UPDATE contacts SET reminder_count = reminder_count + 1, status='reminded' WHERE id=$1`, [
+          c.id,
+        ]);
+        logInfo(`Reminder sent to ${c.name} (${c.phone})`);
+      } else {
+        logError("Reminder failed:", c.id, c.phone, resSend.raw);
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  } catch (err) {
+    logError("Cron reminder error:", err.message || err);
+  }
+});
+
+// =======================
+// START SERVER
+// =======================
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
-  logInfo(`🚀 Server berjalan di port ${PORT}`);
-  logInfo(`🕒 Timezone server: ${process.env.TZ}`);
-  logInfo(`📡 Webhook aktif di: /webhook`);
-  logInfo(`📤 Cron pengiriman aktif setiap 10 menit`);
-  logInfo(`🔔 Cron reminder aktif jam 08:00 WITA`);
+  logInfo(`Server running on port ${PORT}`);
+  logInfo(`Timezone: ${process.env.TZ}`);
+  logInfo("Webhook endpoint: POST /webhook");
+  logInfo("Upload endpoint: POST /upload (multipart/form-data file field 'file')");
+  logInfo("Batch sending: every 10 minutes, 5 contacts / batch, 5s between contacts");
+  logInfo("Reminder: checked every 30 minutes (send if >24h since last_sent)");
 });
