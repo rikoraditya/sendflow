@@ -161,15 +161,6 @@ cron.schedule("0 8 * * *", async () => {
 
 
 // =========================================
-// 🟦 SERVER LISTEN
-// =========================================
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  logInfo(`🚀 Server berjalan di port ${PORT}`);
-});
-
-// =========================================
 // 🟦 CRON: KIRIM KONTAK PER BATCH
 //    - Setiap 10 menit jalan
 //    - 1 batch = 5 kontak
@@ -305,7 +296,7 @@ app.post("/webhook", async (req, res) => {
     logError("❌ Webhook error:", err.message);
     res.status(500).json({ success: false });
   }
-
+});
 
 // =========================================
 // 🟦 SERVER LISTEN
@@ -318,4 +309,4 @@ app.listen(PORT, () => {
   logInfo(`📡 Webhook aktif di: /webhook`);
   logInfo(`📤 Cron pengiriman aktif setiap 10 menit`);
   logInfo(`🔔 Cron reminder aktif jam 08:00 WITA`);
-});});
+});
