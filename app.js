@@ -22,10 +22,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 // =========================================
-// 🟦 TEMPLATE PESAN (DARI USER)
+// 🟦 TEMPLATE PESAN
 // =========================================
 
-// Pesan utama (template kontak pertama)
 const TEMPLATE_UTAMA = `
 Selamat Pagi atau Siang
 Yth. Bapak/Ibu {name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan Oktober ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
@@ -35,7 +34,6 @@ Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
 Terima kasih atas perhatiannya🙏
 `.trim();
 
-// Template reminder
 const TEMPLATE_REMINDER = `
 Selamat Pagi atau Siang
 Yth. Bapak/Ibu 
@@ -54,7 +52,6 @@ Terimakasih atas perhatiannya. Salam Sehat Selalu 😇🙏
 // =========================================
 app.use(bodyParser.json({ limit: "5mb" }));
 app.use(bodyParser.urlencoded({ extended: true, limit: "5mb" }));
-app.use(bodyParser.text({ type: "*/json" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 // =========================================
@@ -66,31 +63,17 @@ function logInfo(...args) {
 function logError(...args) {
   console.error(...args);
 }
-function appendWebhookLog(obj) {
-  try {
-    fs.appendFileSync(
-      path.join(__dirname, "webhook.log"),
-      `[${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })}] ${JSON.stringify(
-        obj,
-        null,
-        2
-      )}\n\n`
-    );
-  } catch (e) {
-    console.error("❌ Gagal append webhook.log:", e.message);
-  }
-}
 
 // =========================================
-// 🟦 POSTGRESQL (SUPABASE)
+// 🟦 DATABASE (SUPABASE / POSTGRES)
 // =========================================
 const pool = new Pool({
-    host: process.env.PGHOST,
-    user: process.env.PGUSER,
-    password: process.env.PGPASSWORD,
-    database: process.env.PGDATABASE,
-    port: process.env.PGPORT,
-    ssl: { rejectUnauthorized: false },
+  host: process.env.PGHOST,
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
+  database: process.env.PGDATABASE,
+  port: process.env.PGPORT,
+  ssl: { rejectUnauthorized: false },
 });
 
 (async () => {
@@ -115,7 +98,7 @@ function normalizePhone(phone) {
 }
 
 // =========================================
-// 🟦 UPLOAD EXCEL + SIMPAN DB
+// 🟦 UPLOAD EXCEL
 // =========================================
 const upload = multer({ dest: "uploads/" });
 
@@ -125,15 +108,17 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ success: false, message: "No file uploaded" });
 
     const workbook = XLSX.readFile(req.file.path);
-    const sheet =
-      XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
+      defval: "",
+    });
 
     let inserted = 0;
-
     for (const row of sheet) {
-      const nik = String(row.nik || row.NIK || row.Nama || "").trim();
+      const nik = String(row.nik || row.NIK || "").trim();
       const name = String(row.name || row.Name || row.Nama || "").trim();
-      const phone = normalizePhone(row.phone || row.Phone || row.hp || row.HP || row["No WA"]);
+      const phone = normalizePhone(
+        row.phone || row.Phone || row.hp || row.HP || row["No WA"]
+      );
 
       if (!nik || !name || !phone) continue;
 
@@ -146,16 +131,15 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             phone = EXCLUDED.phone,
             status = 'pending',
             reminder_count = 0,
-            last_sent = NULL,
-            last_reply = NULL
-        `,
+            last_sent = NULL
+      `,
         [nik, name, phone]
       );
+
       inserted++;
     }
 
     fs.unlinkSync(req.file.path);
-    logInfo(`Upload selesai. Inserted: ${inserted}`);
     res.json({ success: true, message: `${inserted} kontak berhasil diupload.` });
   } catch (err) {
     logError("❌ Upload gagal:", err.message);
@@ -180,7 +164,7 @@ async function sendFonnte(phone, message) {
     });
 
     logInfo("📩 Fonnte response:", result.data);
-    return { success: true, data: result.data };
+    return { success: true };
   } catch (err) {
     logError("❌ Fonnte send error:", err.response?.data || err.message);
     return { success: false };
@@ -188,22 +172,7 @@ async function sendFonnte(phone, message) {
 }
 
 // =========================================
-// 🟦 GET KONTAK PENDING MAKS 20
-// =========================================
-async function getPendingContacts(limit = 20) {
-  const q = `
-    SELECT * FROM contacts
-    WHERE status = 'pending'
-    ORDER BY created_at ASC
-    LIMIT $1
-  `;
-  const { rows } = await pool.query(q, [limit]);
-  return rows;
-}
-
-
-// =========================================
-// 🟦 GET KONTAK PENDING MAKS 20
+// 🟦 GET KONTAK PENDING (LIMIT 20)
 // =========================================
 async function getPendingContacts(limit = 20) {
   const q = `
@@ -232,16 +201,13 @@ async function markSent(id) {
 }
 
 // =========================================
-// 🟦 CRON: KIRIM SETIAP 5 MENIT (MAX 20 KONTAK)
+// 🟦 CRON: KIRIM PER 5 MENIT (MAX 20 KONTAK)
 // =========================================
 cron.schedule("*/5 * * * *", async () => {
   logInfo("⏳ Cron 5 menit berjalan...");
 
   const contacts = await getPendingContacts(20);
-  if (contacts.length === 0) {
-    logInfo("✨ Tidak ada kontak pending.");
-    return;
-  }
+  if (contacts.length === 0) return logInfo("✨ Tidak ada kontak pending.");
 
   logInfo(`📤 Mengirim ${contacts.length} kontak...`);
 
@@ -249,16 +215,14 @@ cron.schedule("*/5 * * * *", async () => {
     const message = TEMPLATE_UTAMA.replace("{name}", c.name);
 
     const sent = await sendFonnte(c.phone, message);
-
     if (sent.success) {
       await markSent(c.id);
-      logInfo(`✅ Terkirim ke ${c.name} (${c.phone})`);
+      logInfo(`✅ Terkirim ke ${c.name}`);
     } else {
-      logError(`❌ Gagal kirim ke ${c.name}`);
+      logError(`❌ Gagal mengirim ke ${c.name}`);
     }
 
-    // Delay 8 detik antar kontak agar aman
-    await new Promise((r) => setTimeout(r, 8000));
+    await new Promise((r) => setTimeout(r, 8000)); // 8 detik delay
   }
 });
 
@@ -274,14 +238,9 @@ cron.schedule("0 8 * * *", async () => {
       AND reminder_count < 1
       AND (NOW() AT TIME ZONE 'Asia/Makassar') - last_sent > INTERVAL '3 days'
   `;
+
   const { rows } = await pool.query(q);
-
-  if (rows.length === 0) {
-    logInfo("✨ Tidak ada yang perlu reminder.");
-    return;
-  }
-
-  logInfo(`🔔 Mengirim reminder ke ${rows.length} kontak`);
+  if (rows.length === 0) return logInfo("✨ Tidak ada yang perlu reminder.");
 
   for (const c of rows) {
     const sent = await sendFonnte(c.phone, TEMPLATE_REMINDER);
@@ -300,4 +259,7 @@ cron.schedule("0 8 * * *", async () => {
   }
 });
 
-
+// =========================================
+// 🟦 START SERVER
+// =========================================
+app.listen(3000, () => logInfo("🚀 Server running on port 3000"));
