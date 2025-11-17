@@ -539,36 +539,46 @@ function formatBaliTime(utcString) {
       renderPagination();
     }
 
-    function renderPagination(){
-      const totalPages = Math.ceil(contacts.length / limit);
-      const pagination = document.getElementById('pagination');
-      pagination.innerHTML = '';
+   function renderPagination(){
+  const totalPages = Math.ceil(contacts.length / limit);
+  const pagination = document.getElementById('pagination');
+  pagination.innerHTML = '';
 
-      if(totalPages <= 1) return;
+  if (totalPages <= 1) return;
 
-      const prevDisabled = currentPage === 1 ? 'disabled' : '';
-      const nextDisabled = currentPage === totalPages ? 'disabled' : '';
+  const maxButtons = 3;
+  let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+  let endPage = startPage + maxButtons - 1;
 
-      pagination.innerHTML += `
-        <li class="page-item ${prevDisabled}">
-          <span class="page-link" onclick="changePage(${currentPage - 1})">&laquo;</span>
-        </li>
-      `;
+  if (endPage > totalPages) {
+    endPage = totalPages;
+    startPage = Math.max(1, endPage - maxButtons + 1);
+  }
 
-      for(let i = 1; i <= totalPages; i++){
-        pagination.innerHTML += `
-          <li class="page-item ${i === currentPage ? 'active' : ''}">
-            <span class="page-link" onclick="changePage(${i})">${i}</span>
-          </li>
-        `;
-      }
+  // Tombol Previous
+  pagination.innerHTML += `
+    <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+      <span class="page-link" onclick="changePage(${currentPage - 1})">&laquo;</span>
+    </li>
+  `;
 
-      pagination.innerHTML += `
-        <li class="page-item ${nextDisabled}">
-          <span class="page-link" onclick="changePage(${currentPage + 1})">&raquo;</span>
-        </li>
-      `;
-    }
+  // Tombol halaman (maksimal 3)
+  for (let i = startPage; i <= endPage; i++) {
+    pagination.innerHTML += `
+      <li class="page-item ${i === currentPage ? 'active' : ''}">
+        <span class="page-link" onclick="changePage(${i})">${i}</span>
+      </li>
+    `;
+  }
+
+  // Tombol Next
+  pagination.innerHTML += `
+    <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+      <span class="page-link" onclick="changePage(${currentPage + 1})">&raquo;</span>
+    </li>
+  `;
+}
+
 
     function changePage(page){
       const totalPages = Math.ceil(contacts.length / limit);
