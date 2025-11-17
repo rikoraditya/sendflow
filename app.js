@@ -175,58 +175,68 @@ async function sendFonnte(phone, message) {
 // ROUTES
 // =======================
 
-// Upload Excel -> insert contacts (name, phone, message optional, delay optional)
-app.post("/api/upload", upload.single("file"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ success: false, message: "File Excel tidak ditemukan" });
-
+// =========================================
+// 🟩 UPLOAD EXCEL -> INSERT CONTACTS
+// =========================================
+app.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
-
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      // Insert or upsert: use nik if exists else name+phone uniqueness
-      for (const r of rows) {
-        const name = (r.name || r.nama || r.nama_lengkap || "").toString().trim();
-        const phoneRaw = r.phone || r.hp || r["No WA"] || r.no_wa || "";
-        const phone = normalizePhone(phoneRaw);
-        if (!name || !phone) {
-          logInfo("Skip invalid row:", { name, phoneRaw });
-          continue;
-        }
-        // Upsert by phone (or you can change to nik unique)
-        await client.query(
-          `INSERT INTO contacts (name, phone, message, status, reminder_count, created_at)
-           VALUES ($1,$2,$3,'pending',0, NOW() AT TIME ZONE 'Asia/Makassar')
-           ON CONFLICT (phone) DO UPDATE
-           SET name = EXCLUDED.name,
-               message = COALESCE(EXCLUDED.message, contacts.message),
-               status = 'pending',
-               reminder_count = 0,
-               last_sent = NULL,
-               last_reply = NULL`,
-          [name, phone, (r.message || "").toString().trim()]
-        );
-      }
-      await client.query("COMMIT");
-      res.json({ success: true, message: "Upload & simpan kontak berhasil" });
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
-      // cleanup uploaded file
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (e) {}
+    if (!req.file) {
+      return res.status(400).json({ error: "Tidak ada file yang diupload" });
     }
-  } catch (err) {
-    logError("Upload handler error:", err.message || err);
-    res.status(500).json({ success: false, message: "Gagal memproses file" });
+
+    // Baca file Excel
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+    if (sheet.length === 0) {
+      return res.status(400).json({ error: "File Excel kosong" });
+    }
+
+    // Format data sesuai DB (name, phone, message optional, delay optional)
+    const contacts = sheet.map((row) => ({
+      name: row.name || row.nama || "",
+      phone: row.phone || row.nohp || "",
+      message: row.message || "",
+      delay: row.delay || 0
+    }));
+
+    // Validasi minimal harus punya phone
+    const validContacts = contacts.filter((c) => c.phone);
+    if (validContacts.length === 0) {
+      return res.status(400).json({ error: "Tidak ada kontak valid di file" });
+    }
+
+    // Kirim ke API contact → Railway
+    const saveUrl = "https://wa-fonnte-api-production-a488.up.railway.app/contacts";
+
+    const response = await fetch(saveUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ contacts: validContacts })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      console.error("Gagal inserting:", result);
+      return res.status(500).json({ error: "Gagal menyimpan kontak ke DB", detail: result });
+    }
+
+    res.json({
+      success: true,
+      message: "Upload berhasil & kontak tersimpan",
+      total: validContacts.length
+    });
+
+  } catch (error) {
+    console.error("❌ Error upload:", error);
+    return res.status(500).json({ error: "Gagal memproses file", detail: error.message });
   }
 });
+
 
 // Webhook Fonnte - receive incoming messages
 app.post("/webhook", async (req, res) => {
