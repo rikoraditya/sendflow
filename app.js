@@ -52,13 +52,13 @@ pool
     // don't exit here; let app start but many features will fail if DB unreachable
   });
 
-// =======================
-// MULTER (upload excel)
-// =======================
+// =========================================
+// 🟦 MULTER MEMORY STORAGE
+// =========================================
 const upload = multer({
-  dest: path.join(__dirname, "uploads"),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  storage: multer.memoryStorage(),
 });
+
 
 // =======================
 // TEMPLATE PESAN
