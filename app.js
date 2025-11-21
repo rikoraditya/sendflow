@@ -229,7 +229,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       nik: String(row.nik || row.NIK || ""),
       name: row.name || row.nama || row.Nama || "",
       phone: String(row.phone || row.nohp || row.telepon || ""),
-      status: "pending",  // default
+      status: "draft",  // default
     }));
 
     // Filter hanya yang punya phone
@@ -339,6 +339,26 @@ app.get("/api/contacts", async (req, res) => {
   } catch (error) {
     console.error("❌ GET /api/contacts error:", error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+// =======================
+// KIRIM MANUAL (BUTTON KIRIM DI UI)
+// =======================
+app.post("/api/send-now", async (req, res) => {
+  try {
+    // Ubah semua draft menjadi pending
+    await pool.query(`
+      UPDATE contacts
+      SET status = 'pending'
+      WHERE status = 'draft'
+    `);
+
+    res.json({ success: true, message: "Kontak siap dikirim melalui cron" });
+  } catch (err) {
+    console.error("send-now error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
