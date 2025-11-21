@@ -26,7 +26,7 @@ app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// ENDPOINT UNTUK MENYIMPAN KONTAK KE DATABASE
+//Simpan ke DB
 app.post("/contacts", async (req, res) => {
   try {
     const { contacts } = req.body;
@@ -35,26 +35,29 @@ app.post("/contacts", async (req, res) => {
       return res.status(400).json({ error: "contacts harus array" });
     }
 
-    // Insert ke PostgreSQL
-    for (let c of contacts) {
+    for (const c of contacts) {
       await pool.query(
         `INSERT INTO contacts (nik, name, phone, status)
-         VALUES ($1, $2, $3, $4)`,
-        [c.nik, c.name, c.phone, "pending"]
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (phone) 
+         DO UPDATE SET 
+            nik = EXCLUDED.nik,
+            name = EXCLUDED.name,
+            status = EXCLUDED.status,
+            updated_at = NOW()`
+        ,
+        [c.nik, c.name, c.phone, c.status]
       );
     }
 
-    res.json({
-      success: true,
-      message: "Kontak berhasil disimpan",
-      total: contacts.length,
-    });
+    res.json({ success: true, inserted: contacts.length });
 
-  } catch (error) {
-    console.error("❌ DB Insert Error:", error);
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error("DB insert error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
+
 
 
 // =======================
@@ -97,8 +100,8 @@ const upload = multer({
 
 const TEMPLATE_UTAMA = `
 Selamat Pagi atau Siang
-Yth. Bapak/Ibu {name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan Oktober ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
-Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini ATAU menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
+Yth. Bapak/Ibu {name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
+Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini atau menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
 Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
 Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
 Terima kasih atas perhatiannya🙏
@@ -190,7 +193,7 @@ async function sendFonnte(phone, message) {
       timeout: 30000,
     });
 
-    logInfo("Fonnte response:", resp.data);
+    //logInfo("Fonnte response:", resp.data);
     // adapt to fonnte response shape — treat truthy status/success as success
     const ok =
       resp.data &&
