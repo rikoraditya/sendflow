@@ -26,6 +26,37 @@ app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// ENDPOINT UNTUK MENYIMPAN KONTAK KE DATABASE
+app.post("/contacts", async (req, res) => {
+  try {
+    const { contacts } = req.body;
+
+    if (!contacts || !Array.isArray(contacts)) {
+      return res.status(400).json({ error: "contacts harus array" });
+    }
+
+    // Insert ke PostgreSQL
+    for (let c of contacts) {
+      await pool.query(
+        `INSERT INTO contacts (nik, name, phone, status)
+         VALUES ($1, $2, $3, $4)`,
+        [c.nik, c.name, c.phone, "pending"]
+      );
+    }
+
+    res.json({
+      success: true,
+      message: "Kontak berhasil disimpan",
+      total: contacts.length,
+    });
+
+  } catch (error) {
+    console.error("❌ DB Insert Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 // =======================
 // POOL POSTGRES (SUPABASE / RAILWAY)
 // - Supports DATABASE_URL or individual vars
