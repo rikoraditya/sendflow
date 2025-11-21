@@ -13,7 +13,6 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import pkg from "pg";
 
-
 dotenv.config();
 const { Pool } = pkg;
 const __filename = fileURLToPath(import.meta.url);
@@ -27,39 +26,31 @@ app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-//Simpan ke DB
-app.post("/contacts", async (req, res) => {
+// =======================
+// HELPERS: logging, phone normalizer, webhook log
+// (declare early so they are available everywhere)
+// =======================
+function logInfo(...args) {
+  console.log("[INFO]", new Date().toLocaleString("id-ID"), ...args);
+}
+function logError(...args) {
+  console.error("[ERROR]", new Date().toLocaleString("id-ID"), ...args);
+}
+function appendWebhookLog(data) {
   try {
-    const { contacts } = req.body;
-
-    if (!contacts || !Array.isArray(contacts)) {
-      return res.status(400).json({ error: "contacts harus array" });
-    }
-
-    for (const c of contacts) {
-      await pool.query(
-        `INSERT INTO contacts (nik, name, phone, status)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (phone) 
-         DO UPDATE SET 
-            nik = EXCLUDED.nik,
-            name = EXCLUDED.name,
-            status = EXCLUDED.status,
-            updated_at = NOW()`
-        ,
-        [c.nik, c.name, c.phone, c.status]
-      );
-    }
-
-    res.json({ success: true, inserted: contacts.length });
-
-  } catch (err) {
-    console.error("DB insert error:", err);
-    res.status(500).json({ error: err.message });
+    const file = path.join(__dirname, "webhook.log");
+    fs.appendFileSync(file, `[${new Date().toISOString()}] ${JSON.stringify(data)}\n`);
+  } catch (e) {
+    console.error("❌ appendWebhookLog failed:", e.message);
   }
-});
-
-
+}
+function normalizePhone(phone) {
+  if (!phone) return null;
+  let p = String(phone).trim().replace(/\D/g, "");
+  if (p.startsWith("0")) p = "62" + p.slice(1);
+  else if (!p.startsWith("62")) p = "62" + p;
+  return p.length >= 9 ? p : null;
+}
 
 // =======================
 // POOL POSTGRES (SUPABASE / RAILWAY)
@@ -94,11 +85,9 @@ const upload = multer({
   storage: multer.memoryStorage(),
 });
 
-
 // =======================
 // TEMPLATE PESAN
 // =======================
-
 const TEMPLATE_UTAMA = `
 Selamat Pagi atau Siang
 Yth. Bapak/Ibu {name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
@@ -120,32 +109,6 @@ Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
 Jangan lupa jaga pola makan, minum rendah gula serta garam, dan olahraga minimal 30 menit pada saat pagi hari, nggih.
 Terimakasih atas perhatiannya. Salam Sehat Selalu 😇🙏
 `.trim();
-
-// =======================
-// HELPERS: logging, phone normalizer, webhook log
-// =======================
-function logInfo(...args) {
-  console.log("[INFO]", new Date().toLocaleString("id-ID"), ...args);
-}
-function logError(...args) {
-  console.error("[ERROR]", new Date().toLocaleString("id-ID"), ...args);
-}
-function appendWebhookLog(data) {
-  try {
-    const file = path.join(__dirname, "webhook.log");
-    fs.appendFileSync(file, `[${new Date().toISOString()}] ${JSON.stringify(data)}\n`);
-  } catch (e) {
-    console.error("❌ appendWebhookLog failed:", e.message);
-  }
-}
-
-function normalizePhone(phone) {
-  if (!phone) return null;
-  let p = String(phone).trim().replace(/\D/g, "");
-  if (p.startsWith("0")) p = "62" + p.slice(1);
-  else if (!p.startsWith("62")) p = "62" + p;
-  return p.length >= 9 ? p : null;
-}
 
 // =======================
 // DB helpers
@@ -194,11 +157,10 @@ async function sendFonnte(phone, message) {
       timeout: 30000,
     });
 
-    //logInfo("Fonnte response:", resp.data);
-    // adapt to fonnte response shape — treat truthy status/success as success
     const ok =
       resp.data &&
       (resp.data.status === true || resp.data.status === "success" || resp.data.success === true);
+
     return { success: Boolean(ok), raw: resp.data };
   } catch (err) {
     logError("sendFonnte error:", err.response?.data || err.message);
@@ -224,54 +186,54 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const sheetName = workbook.SheetNames[0];
     const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-    if (sheet.length === 0) {
-      return res.status(400).json({ error: "File Excel kosong" });
+    if (!Array.isArray(sheet) || sheet.length === 0) {
+      return res.status(400).json({ error: "File Excel kosong atau format tidak dikenali" });
     }
 
     // Format data sesuai kolom DB Anda
     const contacts = sheet.map((row) => ({
-      nik: String(row.nik || row.NIK || ""),
+      nik: String(row.nik || row.NIK || row.Nama || row.nama || ""),
       name: row.name || row.nama || row.Nama || "",
-      phone: String(row.phone || row.nohp || row.telepon || ""),
-      status: "draft",  // default
+      phone: String(row.phone || row.nohp || row.telepon || row.hp || "").replace(/\s+/g, ""),
+      status: "draft", // default
     }));
 
-    // Filter hanya yang punya phone
-    const validContacts = contacts.filter((c) => c.phone.length > 3);
+    // Filter hanya yang punya phone minimal
+    const validContacts = contacts
+      .map((c) => ({ ...c, phone: normalizePhone(c.phone) }))
+      .filter((c) => c.phone && c.phone.length > 3);
 
     if (validContacts.length === 0) {
       return res.status(400).json({ error: "Tidak ada kontak valid di file" });
     }
 
-    // Kirim ke API Railway
-    const saveUrl = "https://wa-fonnte-api-production-a488.up.railway.app/contacts";
+    // Kirim ke API Railway (API menerima { contacts: [...] })
+    const saveUrl = process.env.CONTACTS_API_URL || "https://wa-fonnte-api-production-a488.up.railway.app/contacts";
 
-    const response = await fetch(saveUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contacts: validContacts })
-    });
+    try {
+      const response = await axios.post(saveUrl, { contacts: validContacts }, { timeout: 30000 });
+      const result = response.data;
 
-    const result = await response.json();
-
-    if (!response.ok) {
-      console.error("Gagal inserting:", result);
-      return res.status(500).json({ error: "Gagal menyimpan kontak ke DB", detail: result });
+      // treat non-2xx as error (axios would throw), but check shape
+      if (!result || response.status < 200 || response.status >= 300) {
+        logError("Gagal inserting (non-2xx):", response.status, result);
+        return res.status(500).json({ error: "Gagal menyimpan kontak ke DB", detail: result });
+      }
+    } catch (err) {
+      logError("Gagal inserting to contacts API:", err.response?.data || err.message);
+      return res.status(500).json({ error: "Gagal menyimpan kontak ke DB", detail: err.response?.data || err.message });
     }
 
     res.json({
       success: true,
-      message: "Upload berhasil & kontak tersimpan",
-      total: validContacts.length
+      message: "Upload berhasil & kontak tersimpan (status draft).",
+      total: validContacts.length,
     });
-
   } catch (error) {
-    console.error("❌ Error upload:", error);
+    logError("❌ Error upload:", error);
     return res.status(500).json({ error: "Gagal memproses file", detail: error.message });
   }
 });
-
-
 
 // Webhook Fonnte - receive incoming messages
 app.post("/webhook", async (req, res) => {
@@ -337,15 +299,13 @@ app.get("/api/contacts", async (req, res) => {
     res.json({
       success: true,
       total: rows.length,
-      data: rows
+      data: rows,
     });
-
   } catch (error) {
-    console.error("❌ GET /api/contacts error:", error);
+    logError("❌ GET /api/contacts error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
 
 // =======================
 // KIRIM MANUAL dari tombol UI
@@ -358,7 +318,7 @@ app.post("/api/send", async (req, res) => {
       return res.status(400).json({ success: false, message: "Template pesan tidak lengkap" });
     }
 
-    // Simpan template jika mau digunakan (opsional)
+    // Simpan template global (opsional)
     global.MESSAGE_TEMPLATE = message_template;
     global.REMINDER_TEMPLATE = reminder_template;
 
@@ -371,16 +331,13 @@ app.post("/api/send", async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Kontak berhasil disiapkan. Cron akan mulai mengirim otomatis."
+      message: "Kontak berhasil disiapkan. Cron akan mulai mengirim otomatis.",
     });
-
   } catch (err) {
-    console.error("❌ /api/send error:", err);
+    logError("❌ /api/send error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-
 
 // =======================
 // CRON: Send batch every 10 minutes (batch size 5, delay 5 sec)
@@ -396,7 +353,9 @@ cron.schedule("*/10 * * * *", async () => {
     logInfo(`Will send ${contacts.length} contacts in this batch.`);
 
     for (const c of contacts) {
-      const msg = TEMPLATE_UTAMA.replace("{name}", c.name || "");
+      // use provided global template if set, otherwise fallback
+      const template = global.MESSAGE_TEMPLATE || TEMPLATE_UTAMA;
+      const msg = template.replace("{name}", c.name || "");
       const result = await sendFonnte(c.phone, msg);
 
       if (result.success) {
@@ -404,7 +363,7 @@ cron.schedule("*/10 * * * *", async () => {
         logInfo(`Sent to ${c.name} (${c.phone})`);
       } else {
         logError(`Failed send to ${c.name} (${c.phone})`, result.raw);
-        // keep status 'pending' or mark 'failed' based on policy (we leave as pending to retry)
+        // mark failed to avoid tight retry loops; keep logic flexible
         await pool.query(`UPDATE contacts SET status='failed' WHERE id=$1`, [c.id]).catch(() => {});
       }
 
@@ -441,7 +400,8 @@ cron.schedule("*/30 * * * *", async () => {
     }
 
     for (const c of rows) {
-      const resSend = await sendFonnte(c.phone, TEMPLATE_REMINDER);
+      const reminderTemplate = global.REMINDER_TEMPLATE || TEMPLATE_REMINDER;
+      const resSend = await sendFonnte(c.phone, reminderTemplate);
       if (resSend.success) {
         await pool.query(`UPDATE contacts SET reminder_count = reminder_count + 1, status='reminded' WHERE id=$1`, [
           c.id,
@@ -465,7 +425,7 @@ app.listen(PORT, () => {
   logInfo(`Server running on port ${PORT}`);
   logInfo(`Timezone: ${process.env.TZ}`);
   logInfo("Webhook endpoint: POST /webhook");
-  logInfo("Upload endpoint: POST /upload (multipart/form-data file field 'file')");
+  logInfo("Upload endpoint: POST /api/upload (multipart/form-data file field 'file')");
   logInfo("Batch sending: every 10 minutes, 5 contacts / batch, 5s between contacts");
   logInfo("Reminder: checked every 30 minutes (send if >24h since last_sent)");
 });
