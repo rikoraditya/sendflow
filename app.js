@@ -319,6 +319,32 @@ app.post("/webhook", async (req, res) => {
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 // =======================
+// GET CONTACTS UNTUK UI
+// =======================
+app.get("/api/contacts", async (req, res) => {
+  try {
+    const q = `
+      SELECT id, nik, name, phone, status, last_sent, last_reply, reminder_count, created_at
+      FROM contacts
+      ORDER BY id DESC
+    `;
+    const { rows } = await pool.query(q);
+
+    res.json({
+      success: true,
+      total: rows.length,
+      data: rows
+    });
+
+  } catch (error) {
+    console.error("❌ GET /api/contacts error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+
+// =======================
 // CRON: Send batch every 10 minutes (batch size 5, delay 5 sec)
 // =======================
 cron.schedule("*/10 * * * *", async () => {
