@@ -12,7 +12,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import pkg from "pg";
-import fetch from "node-fetch";
 
 
 dotenv.config();
