@@ -344,20 +344,34 @@ app.get("/api/contacts", async (req, res) => {
 
 
 // =======================
-// KIRIM MANUAL (BUTTON KIRIM DI UI)
+// KIRIM MANUAL dari tombol UI
 // =======================
-app.post("/api/send-now", async (req, res) => {
+app.post("/api/send", async (req, res) => {
   try {
-    // Ubah semua draft menjadi pending
+    const { message_template, reminder_template } = req.body;
+
+    if (!message_template || !reminder_template) {
+      return res.status(400).json({ success: false, message: "Template pesan tidak lengkap" });
+    }
+
+    // Simpan template jika mau digunakan (opsional)
+    global.MESSAGE_TEMPLATE = message_template;
+    global.REMINDER_TEMPLATE = reminder_template;
+
+    // Ubah semua draft -> pending agar masuk ke cron
     await pool.query(`
       UPDATE contacts
       SET status = 'pending'
       WHERE status = 'draft'
     `);
 
-    res.json({ success: true, message: "Kontak siap dikirim melalui cron" });
+    return res.json({
+      success: true,
+      message: "Kontak berhasil disiapkan. Cron akan mulai mengirim otomatis."
+    });
+
   } catch (err) {
-    console.error("send-now error:", err.message);
+    console.error("❌ /api/send error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
