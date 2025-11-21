@@ -193,28 +193,27 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "File Excel kosong" });
     }
 
-    // Format data sesuai DB (name, phone, message optional, delay optional)
+    // Format data sesuai kolom DB Anda
     const contacts = sheet.map((row) => ({
-      name: row.name || row.nama || "",
-      phone: row.phone || row.nohp || "",
-      message: row.message || "",
-      delay: row.delay || 0
+      nik: String(row.nik || row.NIK || ""),
+      name: row.name || row.nama || row.Nama || "",
+      phone: String(row.phone || row.nohp || row.telepon || ""),
+      status: "pending",  // default
     }));
 
-    // Validasi minimal harus punya phone
-    const validContacts = contacts.filter((c) => c.phone);
+    // Filter hanya yang punya phone
+    const validContacts = contacts.filter((c) => c.phone.length > 3);
+
     if (validContacts.length === 0) {
       return res.status(400).json({ error: "Tidak ada kontak valid di file" });
     }
 
-    // Kirim ke API contact → Railway
+    // Kirim ke API Railway
     const saveUrl = "https://wa-fonnte-api-production-a488.up.railway.app/contacts";
 
     const response = await fetch(saveUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contacts: validContacts })
     });
 
@@ -236,6 +235,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     return res.status(500).json({ error: "Gagal memproses file", detail: error.message });
   }
 });
+
 
 
 // Webhook Fonnte - receive incoming messages
