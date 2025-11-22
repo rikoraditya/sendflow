@@ -202,12 +202,12 @@ async function sendPendingBatchOnce() {
       // Build message: prefer a message_template or reminder_message column if exists
       const msg = (c.reminder_message && String(c.reminder_message).trim().length)
         ? c.reminder_message.replace(/{name}/g, c.name)
-        : (c.name ? `Selamat Pagi atau Siang
+        : (c.name ? `Selamat Siang atau Sore
 Yth. Bapak/Ibu  ${c.name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
 Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini atau menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
 Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
 Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
-Terima kasih atas perhatiannya🙏.` : `Selamat Pagi atau Siang
+Terima kasih atas perhatiannya🙏.` : `Selamat Siang atau Sore
 Yth. Bapak/Ibu, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
 Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini atau menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
 Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
