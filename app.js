@@ -202,7 +202,17 @@ async function sendPendingBatchOnce() {
       // Build message: prefer a message_template or reminder_message column if exists
       const msg = (c.reminder_message && String(c.reminder_message).trim().length)
         ? c.reminder_message.replace(/{name}/g, c.name)
-        : (c.name ? `Halo ${c.name}, ini pesan dari klinik kami.` : `Halo, ini pesan dari klinik kami.`);
+        : (c.name ? `Selamat Pagi atau Siang
+Yth. Bapak/Ibu  ${c.name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
+Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini atau menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
+Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
+Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
+Terima kasih atas perhatiannya🙏.` : `Selamat Pagi atau Siang
+Yth. Bapak/Ibu, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
+Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini atau menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
+Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
+Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
+Terima kasih atas perhatiannya🙏.`);
 
       try {
         const resp = await sendMessageViaFonnte(phone, msg, c.id);
@@ -300,7 +310,15 @@ cron.schedule("0 * * * *", async () => {
       const phone = normalizePhone(c.phone);
       if (!phone) continue;
 
-      const reminderMsg = c.reminder_message || `Halo ${c.name}, ini pengingat dari klinik kami.`;
+      const reminderMsg = c.reminder_message || `Selamat Pagi atau Siang
+Yth. Bapak/Ibu  ${c.name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin menindaklanjuti whatsapp kami sebelumnya. 
+Kami mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
+Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini atau menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
+Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
+Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
+
+Jangan lupa jaga pola makan, minum rendah gula serta garam, dan olahraga minimal 30 menit pada saat pagi hari, nggih.
+Terimakasih atas perhatiannya. Salam Sehat Selalu 😇🙏.`;
 
       try {
         const resp = await sendMessageViaFonnte(phone, reminderMsg, c.id);
