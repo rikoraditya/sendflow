@@ -1,4 +1,4 @@
-// 🕒 Set timezone Bali (WITA)
+// 🕒 Set timezone ke Bali (WITA)
 process.env.TZ = "Asia/Makassar";
 
 import express from "express";
@@ -12,431 +12,422 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import pkg from "pg";
+import bodyParser from "body-parser";
 
 dotenv.config();
 const { Pool } = pkg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// =======================
-// INIT APP + MIDDLEWARE
-// =======================
 const app = express();
-app.use(express.json({ limit: "5mb" }));
-app.use(express.urlencoded({ extended: true, limit: "5mb" }));
+
+// Body parsers
+app.use(bodyParser.json({ limit: "5mb" }));
+app.use(bodyParser.urlencoded({ extended: true, limit: "5mb" }));
+app.use(bodyParser.text({ type: "*/json" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-
-
-// =======================
-// HELPERS: logging, phone normalizer, webhook log
-// (declare early so they are available everywhere)
-// =======================
+// Logging helper (file + console)
 function logInfo(...args) {
-  console.log("[INFO]", new Date().toLocaleString("id-ID"), ...args);
+  console.log(...args);
 }
 function logError(...args) {
-  console.error("[ERROR]", new Date().toLocaleString("id-ID"), ...args);
+  console.error(...args);
 }
-function appendWebhookLog(data) {
+function appendWebhookLog(obj) {
   try {
-    const file = path.join(__dirname, "webhook.log");
-    fs.appendFileSync(file, `[${new Date().toISOString()}] ${JSON.stringify(data)}\n`);
+    fs.appendFileSync(
+      path.join(__dirname, "webhook.log"),
+      `[${new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" })}] ${JSON.stringify(
+        obj,
+        null,
+        2
+      )}\n\n`
+    );
   } catch (e) {
-    console.error("❌ appendWebhookLog failed:", e.message);
+    console.error("❌ Gagal append webhook.log:", e.message);
   }
 }
+
+// =============================
+// 🗄️ PostgreSQL (Supabase) pool
+// =============================
+const pool = new Pool({
+  host: process.env.PGHOST,
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
+  database: process.env.PGDATABASE,
+  port: process.env.PGPORT,
+  ssl: { rejectUnauthorized: false },
+});
+
+// Test DB connection at startup
+(async () => {
+  try {
+    await pool.query("SELECT 1");
+    logInfo("✅ Supabase Database connected");
+    logInfo("🕓 Server timezone:", new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" }));
+  } catch (err) {
+    logError("❌ Database connection failed:", err.message);
+    process.exit(1);
+  }
+})();
+
+// =============================
+// ☎️ Normalisasi Nomor HP
+// =============================
 function normalizePhone(phone) {
   if (!phone) return null;
-  let p = String(phone).trim().replace(/\D/g, "");
+  let p = String(phone).replace(/\D/g, "");
   if (p.startsWith("0")) p = "62" + p.slice(1);
   else if (!p.startsWith("62")) p = "62" + p;
-  return p.length >= 9 ? p : null;
+  return p.length < 10 ? null : p;
 }
 
-// =======================
-// POOL POSTGRES (SUPABASE / RAILWAY)
-// - Supports DATABASE_URL or individual vars
-// =======================
-const poolConfig = process.env.DATABASE_URL
-  ? { connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }
-  : {
-      host: process.env.PGHOST,
-      user: process.env.PGUSER,
-      password: process.env.PGPASSWORD,
-      database: process.env.PGDATABASE,
-      port: process.env.PGPORT ? Number(process.env.PGPORT) : undefined,
-      ssl: { rejectUnauthorized: false },
-    };
+// =============================
+// 📁 Upload Excel → Simpan ke DB
+// =============================
+const upload = multer({ dest: "uploads/" });
 
-const pool = new Pool(poolConfig);
-
-// quick test at startup (non-blocking)
-pool
-  .query("SELECT 1")
-  .then(() => logInfo("✅ Database connected"))
-  .catch((e) => {
-    logError("❌ Database connect failed:", e.message || e);
-    // don't exit here; let app start but many features will fail if DB unreachable
-  });
-
-// =========================================
-// 🟦 MULTER MEMORY STORAGE
-// =========================================
-const upload = multer({
-  storage: multer.memoryStorage(),
-});
-
-// =======================
-// TEMPLATE PESAN
-// =======================
-const TEMPLATE_UTAMA = `
-Selamat Pagi atau Siang
-Yth. Bapak/Ibu {name}, Kami dari team Prolanis Klinik Karya Prima, mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
-Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini atau menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
-Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
-Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
-Terima kasih atas perhatiannya🙏
-`.trim();
-
-const TEMPLATE_REMINDER = `
-Selamat Pagi atau Siang
-Yth. Bapak/Ibu 
-Kami dari team Prolanis Klinik Karya Prima, mohon izin menindaklanjuti whatsapp kami sebelumnya. 
-Kami mohon izin mendata serta menanyakan apakah bapak/ibu bulan November ini sudah melakukan cek tekanan darah disertai kontrol gula darah di klinik, rumah sakit, atau tempat kesehatan lainnya? 
-Apabila sudah melakukan pengecekan, mohon dapat mengirimkan foto hasil cek tensi serta gula darah bulan ini atau menginfokan hasil cek tensi serta gula darah terakhir, dan dikirimkan ke nomor whatsapp ini.
-Bapak/Ibu juga dapat menginput hasil cek tensi dan gula darah di link di bawah ini.
-Link pengisian DM dan HT: https://forms.gle/iKQmWeHBpxRbzooU8
-
-Jangan lupa jaga pola makan, minum rendah gula serta garam, dan olahraga minimal 30 menit pada saat pagi hari, nggih.
-Terimakasih atas perhatiannya. Salam Sehat Selalu 😇🙏
-`.trim();
-
-// =======================
-// DB helpers
-// =======================
-async function getPendingContacts(limit = 5) {
-  try {
-    const q = `
-      SELECT * FROM contacts
-      WHERE status = 'pending'
-      ORDER BY created_at ASC, id ASC
-      LIMIT $1
-    `;
-    const { rows } = await pool.query(q, [limit]);
-    return rows || [];
-  } catch (err) {
-    logError("getPendingContacts error:", err.message || err);
-    return [];
-  }
-}
-
-async function markSent(id) {
-  try {
-    await pool.query(
-      `UPDATE contacts
-       SET status = 'sent',
-           last_sent = NOW() AT TIME ZONE 'Asia/Makassar'
-       WHERE id = $1`,
-      [id]
-    );
-  } catch (err) {
-    logError("markSent error:", err.message || err);
-  }
-}
-
-// =======================
-// Sender: Fonnte API
-// =======================
-async function sendFonnte(phone, message) {
-  try {
-    const form = new FormData();
-    form.append("target", phone);
-    form.append("message", message);
-
-    const resp = await axios.post("https://api.fonnte.com/send", form, {
-      headers: { Authorization: process.env.FONNTE_TOKEN || "", ...form.getHeaders() },
-      timeout: 30000,
-    });
-
-    const ok =
-      resp.data &&
-      (resp.data.status === true || resp.data.status === "success" || resp.data.success === true);
-
-    return { success: Boolean(ok), raw: resp.data };
-  } catch (err) {
-    logError("sendFonnte error:", err.response?.data || err.message);
-    return { success: false, raw: err.response?.data || err.message };
-  }
-}
-
-// =======================
-// ROUTES
-// =======================
-
-// =========================================
-// 🟩 UPLOAD EXCEL -> INSERT CONTACTS
-// =========================================
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "Tidak ada file yang diupload" });
-    }
+    if (!req.file) return res.status(400).json({ success: false, message: "No file uploaded" });
 
-    // Baca file Excel
-    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    const workbook = XLSX.readFile(req.file.path);
+    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
 
-    if (!Array.isArray(sheet) || sheet.length === 0) {
-      return res.status(400).json({ error: "File Excel kosong atau format tidak dikenali" });
-    }
+    let inserted = 0;
+    for (const row of sheet) {
+      const nik = String(row.nik || row.NIK || row.NIK?.toString?.() || "").trim();
+      const name = String(row.name || row.Name || row.Nama || "").trim();
+      const phoneRaw = row.phone || row.Phone || row["No WA"] || row["no_wa"] || row.hp || row.HP || "";
+      const phone = normalizePhone(phoneRaw);
 
- const contacts = sheet.map((row) => {
-  // ambil semua key Excel, trim dan lowercase
-  const keys = Object.keys(row).map(k => k.trim().toLowerCase());
-  const rowMap = {};
-  keys.forEach((k, i) => {
-    rowMap[k] = row[Object.keys(row)[i]];
-  });
-
-  return {
-    nik: String(rowMap.nik || ""),
-    name: String(rowMap.name || ""),
-    phone: normalizePhone(String(rowMap.phone || "")),
-    status: "draft",
-  };
-}).filter(c => c.phone.length > 3); // hanya kontak valid dengan phone
-
-
-    // Filter hanya yang punya phone minimal
-    const validContacts = contacts
-      .map((c) => ({ ...c, phone: normalizePhone(c.phone) }))
-      .filter((c) => c.phone && c.phone.length > 3);
-
-    if (validContacts.length === 0) {
-      return res.status(400).json({ error: "Tidak ada kontak valid di file" });
-    }
-
-    // Kirim ke API Railway (API menerima { contacts: [...] })
-    const saveUrl = process.env.CONTACTS_API_URL || "https://wa-fonnte-api-production-a488.up.railway.app/api/contacts";
-
-    try {
-      const response = await axios.post(saveUrl, { contacts: validContacts }, { timeout: 30000 });
-      const result = response.data;
-
-      // treat non-2xx as error (axios would throw), but check shape
-      if (!result || response.status < 200 || response.status >= 300) {
-        logError("Gagal inserting (non-2xx):", response.status, result);
-        return res.status(500).json({ error: "Gagal menyimpan kontak ke DB", detail: result });
+      if (!nik || !name || !phone) {
+        // detailed debug log per row for easier troubleshooting
+        logInfo("⏭ Skip row (missing field):", { nik, name, phoneRaw, phone });
+        continue;
       }
-    } catch (err) {
-      logError("Gagal inserting to contacts API:", err.response?.data || err.message);
-      return res.status(500).json({ error: "Gagal menyimpan kontak ke DB", detail: err.response?.data || err.message });
+
+      await pool.query(
+        `
+        INSERT INTO contacts (nik, name, phone, status, reminder_count, created_at)
+        VALUES ($1, $2, $3, 'pending', 0, NOW() AT TIME ZONE 'Asia/Makassar')
+        ON CONFLICT (nik) DO UPDATE
+        SET name = EXCLUDED.name,
+            phone = EXCLUDED.phone,
+            status = 'pending',
+            reminder_count = 0,
+            last_sent = NULL,
+            last_reply = NULL
+        `,
+        [nik, name, phone]
+      );
+      inserted++;
     }
 
-    res.json({
-      success: true,
-      message: "Upload berhasil & kontak tersimpan (status draft).",
-      total: validContacts.length,
-    });
-  } catch (error) {
-    logError("❌ Error upload:", error);
-    return res.status(500).json({ error: "Gagal memproses file", detail: error.message });
+    fs.unlinkSync(req.file.path);
+    logInfo(`✅ Upload complete — inserted: ${inserted}`);
+    res.json({ success: true, message: `✅ ${inserted} kontak berhasil diupload.` });
+  } catch (err) {
+    logError("❌ Upload gagal:", err.message);
+    res.status(500).json({ success: false, message: "Upload gagal." });
   }
 });
 
-// Webhook Fonnte - receive incoming messages
-app.post("/webhook", async (req, res) => {
-  appendWebhookLog(req.body);
+// =============================
+// 🔧 Helper: send using Fonnte API (with logging & timeout)
+// =============================
+async function sendMessageViaFonnte(targetPhone, message, contactId = null) {
+  const form = new FormData();
+  form.append("target", targetPhone);
+  form.append("message", message);
+
   try {
-    const body = req.body || {};
-    // Accept flexible shapes; many providers send different keys
-    const type = body.type || body.event || null;
-    if (type && type !== "incoming" && type !== "message" && body.type !== undefined) {
-      // if provider uses explicit type and not incoming -> ignore
-      return res.json({ success: true, note: "ignored (not incoming)" });
-    }
+    const resp = await axios.post("https://api.fonnte.com/send", form, {
+      headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
+      timeout: 30_000,
+    });
 
-    // try common fields
-    const phoneRaw = body.phone || body.sender || body.from || body.phone_number || body.whatsapp;
-    const phone = normalizePhone(phoneRaw);
-    const message = body.message || body.text || (body.body && body.body.text) || "";
+    logInfo("📤 Fonnte response:", resp.data);
+    return resp.data;
+  } catch (err) {
+    logError("⚠️ Fonnte send error:", err.message, contactId ? `id=${contactId}` : "");
+    if (err.response) logError("➡️ response data:", err.response.data);
+    throw err;
+  }
+}
 
-    if (!phone || !message) {
-      logInfo("Webhook ignored: missing phone or message", { phoneRaw, message });
-      return res.json({ success: false, message: "missing phone/message" });
-    }
+// =============================
+// 🔁 CORE: sendPendingBatchOnce (robust, idempotent-ish)
+// - runs from CRON every 5 minutes
+// - sends up to 20 contacts with status pending/failed
+// - logs heavily
+// =============================
+let isSendingBatch = false;
 
-    // save incoming
-    await pool.query(
-      `INSERT INTO incoming_messages (phone, message, received_at)
-       VALUES ($1, $2, NOW() AT TIME ZONE 'Asia/Makassar')`,
-      [phone, message]
+async function sendPendingBatchOnce() {
+  if (isSendingBatch) {
+    logInfo("⏳ sendPendingBatchOnce: already running, skipping this tick");
+    return;
+  }
+
+  isSendingBatch = true;
+  logInfo("🚀 sendPendingBatchOnce: starting...");
+
+  try {
+    // pick up to 20 pending/failed contacts (oldest first)
+    const { rows: contacts } = await pool.query(
+      `SELECT * FROM contacts
+       WHERE status IN ('pending','failed')
+       ORDER BY created_at ASC
+       LIMIT 20`
     );
 
-    // update contact if exists
-    await pool.query(
-      `UPDATE contacts
-       SET last_reply = NOW() AT TIME ZONE 'Asia/Makassar',
-           status = 'replied'
-       WHERE phone = $1`,
-      [phone]
-    );
-
-    logInfo(`Received reply from ${phone}: ${message}`);
-    res.json({ success: true });
-  } catch (err) {
-    logError("Webhook handler error:", err.message || err);
-    res.status(500).json({ success: false });
-  }
-});
-
-// Simple health check
-app.get("/health", (req, res) => res.json({ ok: true }));
-
-// =======================
-// GET CONTACTS UNTUK UI
-// =======================
-app.get("/api/contacts", async (req, res) => {
-  try {
-    const q = `
-      SELECT id, nik, name, phone, status, last_sent, last_reply, reminder_count, created_at
-      FROM contacts
-      ORDER BY id DESC
-    `;
-    const { rows } = await pool.query(q);
-
-    res.json({
-      success: true,
-      total: rows.length,
-      data: rows,
-    });
-  } catch (error) {
-    logError("❌ GET /api/contacts error:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// =======================
-// KIRIM MANUAL dari tombol UI
-// =======================
-app.post("/api/send", async (req, res) => {
-  try {
-    const { message_template, reminder_template } = req.body;
-
-    if (!message_template || !reminder_template) {
-      return res.status(400).json({ success: false, message: "Template pesan tidak lengkap" });
-    }
-
-    // Simpan template global (opsional)
-    global.MESSAGE_TEMPLATE = message_template;
-    global.REMINDER_TEMPLATE = reminder_template;
-
-    // Ubah semua draft -> pending agar masuk ke cron
-    await pool.query(`
-      UPDATE contacts
-      SET status = 'pending'
-      WHERE status = 'draft'
-    `);
-
-    return res.json({
-      success: true,
-      message: "Kontak berhasil disiapkan. Cron akan mulai mengirim otomatis.",
-    });
-  } catch (err) {
-    logError("❌ /api/send error:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// =======================
-// CRON: Send batch every 10 minutes (batch size 5, delay 5 sec)
-// =======================
-cron.schedule("*/10 * * * *", async () => {
-  logInfo("Cron batch started: fetching pending contacts...");
-  try {
-    const contacts = await getPendingContacts(5);
     if (!contacts || contacts.length === 0) {
-      logInfo("No pending contacts.");
+      logInfo("ℹ️ No pending/failed contacts to send.");
       return;
     }
-    logInfo(`Will send ${contacts.length} contacts in this batch.`);
+
+    logInfo(`📦 Got ${contacts.length} contacts to process.`);
 
     for (const c of contacts) {
-      // use provided global template if set, otherwise fallback
-      const template = global.MESSAGE_TEMPLATE || TEMPLATE_UTAMA;
-      const msg = template.replace("{name}", c.name || "");
-      const result = await sendFonnte(c.phone, msg);
-
-      if (result.success) {
-        await markSent(c.id);
-        logInfo(`Sent to ${c.name} (${c.phone})`);
-      } else {
-        logError(`Failed send to ${c.name} (${c.phone})`, result.raw);
-        // mark failed to avoid tight retry loops; keep logic flexible
-        await pool.query(`UPDATE contacts SET status='failed' WHERE id=$1`, [c.id]).catch(() => {});
+      const phone = normalizePhone(c.phone);
+      if (!phone) {
+        logError(`⚠ Invalid phone for id=${c.id} (${c.phone}) — marking failed`);
+        await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
+        continue;
       }
 
-      // delay between messages
-      await new Promise((r) => setTimeout(r, 5000));
+      // Build message: prefer a message_template or reminder_message column if exists
+      const msg = (c.reminder_message && String(c.reminder_message).trim().length)
+        ? c.reminder_message.replace(/{name}/g, c.name)
+        : (c.name ? `Halo ${c.name}, ini pesan dari klinik kami.` : `Halo, ini pesan dari klinik kami.`);
+
+      try {
+        const resp = await sendMessageViaFonnte(phone, msg, c.id);
+
+        if (resp && (resp.status === true || resp.status === "success" || resp.success)) {
+          // mark sent
+          await pool.query(
+            `UPDATE contacts
+             SET status='sent',
+                 last_sent = NOW() AT TIME ZONE 'Asia/Makassar'
+             WHERE id=$1`,
+            [c.id]
+          );
+          logInfo(`✅ Sent id=${c.id} (${c.name})`);
+        } else {
+          // fallback: mark failed, will retry on next tick
+          await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
+          logError(`❌ Fonnte responded with failure for id=${c.id}`, resp && resp.data ? resp.data : resp);
+        }
+      } catch (err) {
+        // In case of network / API error mark as failed; will be retried later
+        try {
+          await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
+        } catch (uErr) {
+          logError("❌ Failed to mark contact as failed:", uErr.message);
+        }
+        logError(`⚠ Error sending id=${c.id}:`, err.message);
+      }
+
+      // small delay between messages (to be gentle)
+      await new Promise((r) => setTimeout(r, 1500));
     }
 
-    logInfo("Batch finished.");
+    logInfo("✅ sendPendingBatchOnce: finished processing batch.");
   } catch (err) {
-    logError("Cron batch error:", err.message || err);
+    logError("❌ sendPendingBatchOnce top-level error:", err.message);
+  } finally {
+    isSendingBatch = false;
+  }
+}
+
+// schedule every 5 minutes
+cron.schedule("*/5 * * * *", async () => {
+  logInfo("⏰ CRON tick (*/5 * * * *): running sendPendingBatchOnce");
+  try {
+    await sendPendingBatchOnce();
+  } catch (err) {
+    logError("❌ CRON error:", err.message);
   }
 });
 
-// =======================
-// CRON: Reminder check every 30 minutes -> send if >24h since last_sent and no reply
-// - limit reminders per contact to 1 (reminder_count < 1)
-// =======================
-cron.schedule("*/30 * * * *", async () => {
-  logInfo("Cron reminder: checking candidates...");
+// Also expose a manual trigger endpoint (kept for compatibility)
+app.post("/api/send", async (req, res) => {
   try {
-    const q = `
+    // Optional: allow a message_template override
+    const { message_template } = req.body || {};
+    logInfo("🔔 Manual /api/send called, triggering batch send once (manual). Template override:", !!message_template);
+
+    // If provided, temporarily update reminder_message for contacts? (keep simple: ignore here)
+    if (isSendingBatch) return res.json({ success: false, message: "Send already in progress" });
+
+    // Trigger send
+    await sendPendingBatchOnce();
+    res.json({ success: true, message: "Batch send executed (manual trigger)." });
+  } catch (err) {
+    logError("❌ /api/send error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to send batch." });
+  }
+});
+
+// =============================
+// 🔁 Reminder Otomatis tiap jam (cek kontak yang sent & no reply 24 jam)
+// - reminder_count < 2 (keamanan agar tidak spam)
+// =============================
+cron.schedule("0 * * * *", async () => {
+  logInfo("⏰ CRON hourly: checking reminders...");
+
+  try {
+    const { rows } = await pool.query(`
       SELECT * FROM contacts
       WHERE status = 'sent'
-        AND reminder_count < 1
-        AND last_reply IS NULL
-        AND (NOW() AT TIME ZONE 'Asia/Makassar') - last_sent > INTERVAL '24 hours'
-      ORDER BY last_sent ASC
-      LIMIT 50
-    `;
-    const { rows } = await pool.query(q);
+      AND reminder_count < 2
+      AND (last_reply IS NULL)
+      AND NOW() - last_sent >= INTERVAL '24 hours'
+    `);
+
     if (!rows || rows.length === 0) {
-      logInfo("No reminder candidates.");
+      logInfo("ℹ️ No reminder candidates.");
       return;
     }
 
+    logInfo(`🔔 Found ${rows.length} reminder candidates.`);
+
     for (const c of rows) {
-      const reminderTemplate = global.REMINDER_TEMPLATE || TEMPLATE_REMINDER;
-      const resSend = await sendFonnte(c.phone, reminderTemplate);
-      if (resSend.success) {
-        await pool.query(`UPDATE contacts SET reminder_count = reminder_count + 1, status='reminded' WHERE id=$1`, [
-          c.id,
-        ]);
-        logInfo(`Reminder sent to ${c.name} (${c.phone})`);
-      } else {
-        logError("Reminder failed:", c.id, c.phone, resSend.raw);
+      const phone = normalizePhone(c.phone);
+      if (!phone) continue;
+
+      const reminderMsg = c.reminder_message || `Halo ${c.name}, ini pengingat dari klinik kami.`;
+
+      try {
+        const resp = await sendMessageViaFonnte(phone, reminderMsg, c.id);
+        if (resp && (resp.status === true || resp.success)) {
+          await pool.query(
+            `UPDATE contacts SET status='reminded', reminder_count = reminder_count + 1, last_sent = NOW() AT TIME ZONE 'Asia/Makassar' WHERE id=$1`,
+            [c.id]
+          );
+          logInfo(`🔁 Reminder sent to id=${c.id} (${c.name})`);
+        } else {
+          await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
+          logError(`⚠ Reminder failed (fonnte responded negatively) for id=${c.id}`);
+        }
+      } catch (err) {
+        logError(`⚠ Reminder send error id=${c.id}:`, err.message);
+        try {
+          await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
+        } catch (uErr) {
+          logError("❌ Failed to update contact status:", uErr.message);
+        }
       }
-      await new Promise((r) => setTimeout(r, 5000));
+
+      await new Promise((r) => setTimeout(r, 2000));
     }
   } catch (err) {
-    logError("Cron reminder error:", err.message || err);
+    logError("❌ Reminder CRON error:", err.message);
   }
 });
 
-// =======================
-// START SERVER
-// =======================
+// =============================
+// 📩 Webhook Fonnte → Balasan Pasien
+// - saves reply and updates contact status -> replied
+// - logs everything to webhook.log for debugging
+// =============================
+app.post(["/webhook/fonnte", "//webhook/fonnte"], async (req, res) => {
+  res.status(200).json({ success: true, message: "Webhook diterima" });
+
+  const data = req.body || {};
+  appendWebhookLog(data);
+  logInfo("📩 Webhook received:", JSON.stringify(data));
+
+  const phoneRaw = data.phone || data.sender || data.from || data.phone_number;
+  const phone = normalizePhone(phoneRaw);
+  const message = data.message || data.text || (data.body && data.body.text) || "";
+
+  if (!phone || !message) {
+    logInfo("⚠ Webhook missing phone or message:", { phoneRaw, message });
+    return;
+  }
+
+  try {
+    const { rows } = await pool.query("SELECT id FROM contacts WHERE phone=$1 LIMIT 1", [phone]);
+
+    if (!rows || rows.length === 0) {
+      logInfo("⚠ Incoming phone not found in contacts table, ignoring:", phone);
+      return;
+    }
+
+    const contactId = rows[0].id;
+
+    await pool.query(
+      `INSERT INTO reply (contact_id, phone, message, created_at)
+       VALUES ($1, $2, $3, NOW() AT TIME ZONE 'Asia/Makassar')`,
+      [contactId, phone, message]
+    );
+
+    // Update contact: status replied, set last_reply
+    await pool.query(
+      `UPDATE contacts
+       SET status='replied',
+           last_reply = NOW() AT TIME ZONE 'Asia/Makassar'
+       WHERE id=$1`,
+      [contactId]
+    );
+
+    // Optional: bump created_at or updated_at to push replied to top (we sort by status first, then created_at DESC)
+    await pool.query(`UPDATE contacts SET created_at = NOW() AT TIME ZONE 'Asia/Makassar' WHERE id=$1`, [contactId]);
+
+    logInfo(`💬 Reply saved for id=${contactId} (${phone}):`, message);
+  } catch (err) {
+    logError("❌ Webhook handler error:", err.message);
+  }
+});
+
+// =============================
+// 📋 API Kontak (termasuk balasan terakhir) — Sorting A (replied first)
+// =============================
+app.get("/api/contacts", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.*,
+        (
+          SELECT r.message 
+          FROM reply r 
+          WHERE r.contact_id = c.id 
+          ORDER BY r.created_at DESC 
+          LIMIT 1
+        ) AS last_reply_message
+      FROM contacts c
+      ORDER BY
+        (CASE
+           WHEN status='replied' THEN 1
+           WHEN status='reminded' THEN 2
+           WHEN status='sent' THEN 3
+           WHEN status='pending' THEN 4
+           ELSE 5
+         END),
+        c.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    logError("❌ GET /api/contacts error:", err.message);
+    res.status(500).json({ success: false, message: "Gagal ambil data kontak." });
+  }
+});
+
+// =============================
+// 🌐 Halaman Utama
+// =============================
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public/index.html"));
+});
+
+// =============================
+// 🚀 Jalankan Server
+// =============================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  logInfo(`Server running on port ${PORT}`);
-  logInfo(`Timezone: ${process.env.TZ}`);
-  logInfo("Webhook endpoint: POST /webhook");
-  logInfo("Upload endpoint: POST /api/upload (multipart/form-data file field 'file')");
-  logInfo("Batch sending: every 10 minutes, 5 contacts / batch, 5s between contacts");
-  logInfo("Reminder: checked every 30 minutes (send if >24h since last_sent)");
+  logInfo(`🚀 Server running on http://localhost:${PORT} (WITA)`);
 });
