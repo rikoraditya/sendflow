@@ -26,6 +26,15 @@ app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+
+function normalizePhone(phone) {
+  if (!phone) return "";
+  phone = phone.replace(/\D/g, ""); // hapus semua selain angka
+  if (phone.startsWith("0")) phone = "62" + phone.slice(1); // ganti 0 awal dengan 62
+  return phone;
+}
+
+
 // =======================
 // HELPERS: logging, phone normalizer, webhook log
 // (declare early so they are available everywhere)
@@ -190,13 +199,22 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "File Excel kosong atau format tidak dikenali" });
     }
 
-    // Format data sesuai kolom DB Anda
-    const contacts = sheet.map((row) => ({
-      nik: String(row.nik || row.NIK || row.Nama || row.nama || ""),
-      name: row.name || row.nama || row.Nama || "",
-      phone: String(row.phone || row.nohp || row.telepon || row.hp || "").replace(/\s+/g, ""),
-      status: "draft", // default
-    }));
+ const contacts = sheet.map((row) => {
+  // ambil semua key Excel, trim dan lowercase
+  const keys = Object.keys(row).map(k => k.trim().toLowerCase());
+  const rowMap = {};
+  keys.forEach((k, i) => {
+    rowMap[k] = row[Object.keys(row)[i]];
+  });
+
+  return {
+    nik: String(rowMap.nik || ""),
+    name: String(rowMap.name || ""),
+    phone: normalizePhone(String(rowMap.phone || "")),
+    status: "draft",
+  };
+}).filter(c => c.phone.length > 3); // hanya kontak valid dengan phone
+
 
     // Filter hanya yang punya phone minimal
     const validContacts = contacts
