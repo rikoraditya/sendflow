@@ -219,7 +219,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
 
     // Kirim ke API Railway (API menerima { contacts: [...] })
-    const saveUrl = process.env.CONTACTS_API_URL || "https://wa-fonnte-api-production-a488.up.railway.app/contacts";
+    const saveUrl = process.env.CONTACTS_API_URL || "https://wa-fonnte-api-production-a488.up.railway.app/api/contacts";
 
     try {
       const response = await axios.post(saveUrl, { contacts: validContacts }, { timeout: 30000 });
