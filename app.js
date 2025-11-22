@@ -27,13 +27,6 @@ app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 
-function normalizePhone(phone) {
-  if (!phone) return "";
-  phone = phone.replace(/\D/g, ""); // hapus semua selain angka
-  if (phone.startsWith("0")) phone = "62" + phone.slice(1); // ganti 0 awal dengan 62
-  return phone;
-}
-
 
 // =======================
 // HELPERS: logging, phone normalizer, webhook log
