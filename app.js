@@ -105,78 +105,121 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 });
 
 // =============================
-// 📱 Kirim Pesan Batch (20 kontak / 5 menit)
+// 🛡️ SAFE MODE — Pengiriman Sangat Aman
+// Batch 5 kontak • Delay 7 detik • Batch delay 12 menit • Retry otomatis
 // =============================
 app.post("/api/send", async (req, res) => {
   const { message_template, reminder_template } = req.body;
+
   try {
     const { rows: contacts } = await pool.query(
       "SELECT * FROM contacts WHERE status IN ('pending','failed') ORDER BY created_at ASC"
     );
+
     if (contacts.length === 0)
       return res.json({ success: false, message: "Tidak ada kontak untuk dikirim." });
 
-    console.log(`🚀 Mulai kirim ${contacts.length} kontak dalam batch 20 tiap 5 menit`);
+    console.log(`🛡️ SAFE MODE aktif — ${contacts.length} kontak akan dikirim aman & bertahap.`);
+
+    // 🔹 Batch hanya 5 kontak
     const batches = [];
-    for (let i = 0; i < contacts.length; i += 20) {
-      batches.push(contacts.slice(i, i + 20));
+    for (let i = 0; i < contacts.length; i += 5) {
+      batches.push(contacts.slice(i, i + 5));
     }
 
     let batchIndex = 0;
-    const processBatch = async () => {
-      if (batchIndex >= batches.length) {
-        console.log("✅ Semua batch selesai dikirim.");
-        return;
-      }
+    let totalFailed = 0;
 
-      const batch = batches[batchIndex];
-      console.log(`📦 Batch ${batchIndex + 1}/${batches.length}`);
+    // 🔁 Fungsi retry (maks 3x)
+    async function sendWithRetry(phone, msg, retries = 3) {
+      let form = new FormData();
+      form.append("target", phone);
+      form.append("message", msg);
 
-      for (const c of batch) {
-        const phone = normalizePhone(c.phone);
-        if (!phone) continue;
-        let msg = message_template.replace(/{name}/g, c.name);
-
-        const form = new FormData();
-        form.append("target", phone);
-        form.append("message", msg);
-
+      for (let attempt = 1; attempt <= retries; attempt++) {
         try {
           const resp = await axios.post("https://api.fonnte.com/send", form, {
             headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
           });
 
-          if (resp.data.status) {
-            await pool.query(
-              `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
-              [reminder_template, c.id]
-            );
-            console.log(`✅ Terkirim ke ${c.name}`);
-          } else {
-            await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
-          }
-        } catch (err) {
-          console.log(`⚠️ Gagal kirim ke ${c.phone}: ${err.message}`);
+          if (resp.data.status) return { success: true };
+        } catch (e) {
+          console.log(`⚠️ Retry ${attempt}/${retries} gagal untuk ${phone}`);
         }
 
-        await new Promise((r) => setTimeout(r, 2000)); // jeda antar pesan
+        await new Promise((r) => setTimeout(r, 5000)); // jeda 5 detik antar retry
+      }
+
+      return { success: false };
+    }
+
+    // 🚀 Mulai proses
+    const processBatch = async () => {
+      if (batchIndex >= batches.length) {
+        console.log("🎉 Semua batch selesai.");
+        return;
+      }
+
+      const batch = batches[batchIndex];
+      console.log(`📦 SAFE BATCH ${batchIndex + 1}/${batches.length}`);
+
+      let failedInBatch = 0;
+
+      for (const c of batch) {
+        const phone = normalizePhone(c.phone);
+        if (!phone) continue;
+
+        const msg = message_template.replace(/{name}/g, c.name);
+
+        // 🔁 Kirim dengan retry
+        const result = await sendWithRetry(phone, msg);
+
+        if (result.success) {
+          await pool.query(
+            `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
+            [reminder_template, c.id]
+          );
+          console.log(`✅ Terkirim ke ${c.name}`);
+        } else {
+          failedInBatch++;
+          totalFailed++;
+          await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
+          console.log(`❌ Gagal kirim ke ${c.name} (${phone})`);
+        }
+
+        // ⏱️ Aman: jeda 7 detik antar orang
+        await new Promise((r) => setTimeout(r, 7000));
+      }
+
+      // 🛑 AUTO-PAUSE bila 3 orang gagal dalam batch
+      if (failedInBatch >= 3) {
+        console.log("🛑 Pengiriman dihentikan — terlalu banyak gagal di 1 batch (≥ 3).");
+        return;
+      }
+
+      // 🛑 AUTO-PAUSE bila gagal total lebih dari 10%
+      if (totalFailed / contacts.length > 0.1) {
+        console.log("🛑 Pengiriman dihentikan — lebih dari 10% kontak gagal. Lindungi nomor WA.");
+        return;
       }
 
       batchIndex++;
+
       if (batchIndex < batches.length) {
-        console.log("⏳ Tunggu 5 menit sebelum batch berikutnya...");
-        setTimeout(processBatch, 5 * 60 * 1000);
+        console.log("⏳ SAFE MODE delay 12 menit sebelum batch berikutnya...");
+        setTimeout(processBatch, 12 * 60 * 1000);
       }
     };
 
     processBatch();
+
     res.json({
       success: true,
-      message: `Pengiriman dimulai — total ${contacts.length} kontak dalam ${batches.length} batch.`,
+      message: `SAFE MODE aktif — pengiriman dimulai. Total ${contacts.length} kontak dalam ${batches.length} batch.`,
     });
   } catch (err) {
-    console.error("❌ Error kirim:", err.message);
-    res.status(500).json({ success: false, message: "Gagal kirim pesan." });
+    console.error("❌ Error SAFE MODE:", err.message);
+    res.status(500).json({ success: false, message: "Gagal memulai SAFE MODE." });
   }
 });
 
