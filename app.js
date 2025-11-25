@@ -104,35 +104,31 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
+
 // =============================
-// 🛡️ SAFE MODE — Pengiriman Sangat Aman
-// Batch 5 kontak • Delay 7 detik • Batch delay 12 menit • Retry otomatis
+// 🛡️ MODE MANUAL BATCH — MAKS 20 PER KIRIM
+// Tidak ada auto-lanjut batch, user klik kirim lagi untuk batch berikutnya
 // =============================
 app.post("/api/send", async (req, res) => {
   const { message_template, reminder_template } = req.body;
 
   try {
     const { rows: contacts } = await pool.query(
-      "SELECT * FROM contacts WHERE status IN ('pending','failed') ORDER BY created_at ASC"
+      "SELECT * FROM contacts WHERE status IN ('pending','failed') ORDER BY created_at ASC LIMIT 20"
     );
 
-    if (contacts.length === 0)
+    if (contacts.length === 0) {
       return res.json({ success: false, message: "Tidak ada kontak untuk dikirim." });
-
-    console.log(`🛡️ SAFE MODE aktif — ${contacts.length} kontak akan dikirim aman & bertahap.`);
-
-    // 🔹 Batch hanya 5 kontak
-    const batches = [];
-    for (let i = 0; i < contacts.length; i += 5) {
-      batches.push(contacts.slice(i, i + 5));
     }
 
-    let batchIndex = 0;
-    let totalFailed = 0;
+    console.log(`🚀 MODE MANUAL BATCH — ${contacts.length} kontak akan dikirim.`);
 
-    // 🔁 Fungsi retry (maks 3x)
+    let totalFailed = 0;
+    let totalSuccess = 0;
+
+    // 🔁 retry function
     async function sendWithRetry(phone, msg, retries = 3) {
-      let form = new FormData();
+      const form = new FormData();
       form.append("target", phone);
       form.append("message", msg);
 
@@ -144,84 +140,51 @@ app.post("/api/send", async (req, res) => {
 
           if (resp.data.status) return { success: true };
         } catch (e) {
-          console.log(`⚠️ Retry ${attempt}/${retries} gagal untuk ${phone}`);
+          console.log(`⚠ Retry ${attempt}/${retries} gagal → ${phone}`);
         }
 
-        await new Promise((r) => setTimeout(r, 5000)); // jeda 5 detik antar retry
+        await new Promise((r) => setTimeout(r, 5000)); // jeda antar retry
       }
 
       return { success: false };
     }
 
-    // 🚀 Mulai proses
-    const processBatch = async () => {
-      if (batchIndex >= batches.length) {
-        console.log("🎉 Semua batch selesai.");
-        return;
+    // Kirim satu per satu
+    for (const c of contacts) {
+      const phone = normalizePhone(c.phone);
+      if (!phone) continue;
+
+      const msg = message_template.replace(/{name}/g, c.name);
+
+      const result = await sendWithRetry(phone, msg);
+
+      if (result.success) {
+        totalSuccess++;
+        await pool.query(
+          `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
+          [reminder_template, c.id]
+        );
+        console.log(`✅ Terkirim ke ${c.name}`);
+      } else {
+        totalFailed++;
+        await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
+        console.log(`❌ Gagal kirim ke ${c.name}`);
       }
 
-      const batch = batches[batchIndex];
-      console.log(`📦 SAFE BATCH ${batchIndex + 1}/${batches.length}`);
-
-      let failedInBatch = 0;
-
-      for (const c of batch) {
-        const phone = normalizePhone(c.phone);
-        if (!phone) continue;
-
-        const msg = message_template.replace(/{name}/g, c.name);
-
-        // 🔁 Kirim dengan retry
-        const result = await sendWithRetry(phone, msg);
-
-        if (result.success) {
-          await pool.query(
-            `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
-            [reminder_template, c.id]
-          );
-          console.log(`✅ Terkirim ke ${c.name}`);
-        } else {
-          failedInBatch++;
-          totalFailed++;
-          await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
-          console.log(`❌ Gagal kirim ke ${c.name} (${phone})`);
-        }
-
-        // ⏱️ Aman: jeda 7 detik antar orang
-        await new Promise((r) => setTimeout(r, 7000));
-      }
-
-      // 🛑 AUTO-PAUSE bila 3 orang gagal dalam batch
-      if (failedInBatch >= 3) {
-        console.log("🛑 Pengiriman dihentikan — terlalu banyak gagal di 1 batch (≥ 3).");
-        return;
-      }
-
-      // 🛑 AUTO-PAUSE bila gagal total lebih dari 10%
-      if (totalFailed / contacts.length > 0.1) {
-        console.log("🛑 Pengiriman dihentikan — lebih dari 10% kontak gagal. Lindungi nomor WA.");
-        return;
-      }
-
-      batchIndex++;
-
-      if (batchIndex < batches.length) {
-        console.log("⏳ SAFE MODE delay 12 menit sebelum batch berikutnya...");
-        setTimeout(processBatch, 12 * 60 * 1000);
-      }
-    };
-
-    processBatch();
+      await new Promise((r) => setTimeout(r, 5000)); // delay aman
+    }
 
     res.json({
       success: true,
-      message: `SAFE MODE aktif — pengiriman dimulai. Total ${contacts.length} kontak dalam ${batches.length} batch.`,
+      message: `Batch selesai. Sukses: ${totalSuccess}, Gagal: ${totalFailed}. Klik kirim lagi untuk batch berikutnya.`,
     });
+
   } catch (err) {
-    console.error("❌ Error SAFE MODE:", err.message);
-    res.status(500).json({ success: false, message: "Gagal memulai SAFE MODE." });
+    console.error("❌ Error MODE MANUAL BATCH:", err.message);
+    res.status(500).json({ success: false, message: "Gagal memulai pengiriman batch." });
   }
 });
+
 
 // =============================
 // 🔁 Reminder Otomatis Tiap Jam (24 jam setelah pesan dikirim)
