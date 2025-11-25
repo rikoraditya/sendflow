@@ -105,9 +105,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 });
 
 
+// 🌏 Format waktu ke zona WITA (GMT+8)
+function waktuBali() {
+  return new Date().toLocaleString("id-ID", {
+    timeZone: "Asia/Makassar",
+    hour12: false,
+  });
+}
+
 // =============================
-// 🛡️ MODE MANUAL BATCH — MAKS 20 PER KIRIM
-// Tidak ada auto-lanjut batch, user klik kirim lagi untuk batch berikutnya
+// 🛡️ MODE MANUAL BATCH — MAKS 20 PER KIRIM (VERSI SAFER)
 // =============================
 app.post("/api/send", async (req, res) => {
   const { message_template, reminder_template } = req.body;
@@ -121,69 +128,72 @@ app.post("/api/send", async (req, res) => {
       return res.json({ success: false, message: "Tidak ada kontak untuk dikirim." });
     }
 
-    console.log(`🚀 MODE MANUAL BATCH — ${contacts.length} kontak akan dikirim.`);
+    console.log(`(${waktuBali()}) 🚀 MODE MANUAL BATCH — ${contacts.length} kontak.`);
 
     let totalFailed = 0;
     let totalSuccess = 0;
 
-    // 🔁 retry function
-    async function sendWithRetry(phone, msg, retries = 3) {
+    async function sendSafe(phone, msg) {
       const form = new FormData();
       form.append("target", phone);
       form.append("message", msg);
 
-      for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-          const resp = await axios.post("https://api.fonnte.com/send", form, {
-            headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
-          });
+      try {
+        const resp = await axios.post("https://api.fonnte.com/send", form, {
+          headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
+        });
+        if (resp.data.status) return true;
+      } catch {}
 
-          if (resp.data.status) return { success: true };
-        } catch (e) {
-          console.log(`⚠ Retry ${attempt}/${retries} gagal → ${phone}`);
-        }
+      await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 4000) + 3000));
 
-        await new Promise((r) => setTimeout(r, 5000)); // jeda antar retry
+      try {
+        const resp2 = await axios.post("https://api.fonnte.com/send", form, {
+          headers: { Authorization: process.env.FONNTE_TOKEN, ...form.getHeaders() },
+        });
+        return resp2.data.status === true;
+      } catch {
+        return false;
       }
-
-      return { success: false };
     }
 
-    // Kirim satu per satu
     for (const c of contacts) {
       const phone = normalizePhone(c.phone);
       if (!phone) continue;
 
       const msg = message_template.replace(/{name}/g, c.name);
 
-      const result = await sendWithRetry(phone, msg);
+      const ok = await sendSafe(phone, msg);
 
-      if (result.success) {
+      if (ok) {
         totalSuccess++;
         await pool.query(
           `UPDATE contacts SET status='sent', last_sent=NOW(), reminder_message=$1 WHERE id=$2`,
           [reminder_template, c.id]
         );
-        console.log(`✅ Terkirim ke ${c.name}`);
+        console.log(`(${waktuBali()}) ✅ Terkirim ke ${c.name}`);
       } else {
         totalFailed++;
         await pool.query("UPDATE contacts SET status='failed' WHERE id=$1", [c.id]);
-        console.log(`❌ Gagal kirim ke ${c.name}`);
+        console.log(`(${waktuBali()}) ❌ Gagal ke ${c.name}`);
       }
 
-      await new Promise((r) => setTimeout(r, 5000)); // delay aman
+      const delay = Math.floor(Math.random() * 10000) + 8000;
+      console.log(`(${waktuBali()}) ⏳ Delay aman: ${delay / 1000}s`);
+      await new Promise((r) => setTimeout(r, delay));
     }
 
     res.json({
       success: true,
-      message: `Batch selesai. Sukses: ${totalSuccess}, Gagal: ${totalFailed}. Klik kirim lagi untuk batch berikutnya.`,
+      message: `Batch selesai. Sukses: ${totalSuccess}, Gagal: ${totalFailed}`,
     });
 
   } catch (err) {
-    console.error("❌ Error MODE MANUAL BATCH:", err.message);
-    res.status(500).json({ success: false, message: "Gagal memulai pengiriman batch." });
+    console.error(`(${waktuBali()}) ❌ Error BATCH SAFE:`, err.message);
+    res.status(500).json({ success: false, message: "Gagal pengiriman batch." });
   }
 });
+
 
 
 // =============================
