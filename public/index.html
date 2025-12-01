@@ -2,73 +2,96 @@
 <html lang="id">
 <head>
   <meta charset="utf-8">
-  <title>Sendflow Modern UI</title>
+  <title>Sendflow SMS — Modern UI v2</title>
 
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 
   <style>
     body {
-      background: linear-gradient(135deg, #e0e7ff, #f8fafc);
+      background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
       min-height: 100vh;
       font-family: 'Inter', sans-serif;
     }
 
-    .glass-card {
-      background: rgba(255, 255, 255, 0.8);
-      backdrop-filter: blur(12px);
-      border-radius: 20px;
-      box-shadow: 0px 10px 25px rgba(0,0,0,0.05);
-      padding: 22px;
-    }
-
-    .table-modern th {
-      background: #f1f5f9 !important;
-      font-weight: 600;
-    }
-    .table-modern tbody tr:hover {
-      background: #f8fafc;
-      transition: 0.2s;
-    }
-
-    .status-pill {
-      padding: 5px 10px;
-      border-radius: 30px;
-      font-size: 12px;
-      font-weight: 600;
-    }
-    .pill-success { background: #dcfce7; color:#166534; }
-    .pill-pending { background: #fef9c3; color:#854d0e; }
-    .pill-failed  { background: #fee2e2; color:#991b1b; }
-
-    .form-control, .btn {
-      border-radius: 12px !important;
-    }
-
-    .section-title {
-      font-weight: 700;
-      font-size: 20px;
-    }
-
-    .btn-primary {
-      background: #4f46e5;
-      border: none;
-    }
-    .btn-primary:hover {
-      background: #4338ca;
-    }
-    .btn-success {
-      background: #10b981;
-      border: none;
+    .glass {
+      background: rgba(255, 255, 255, 0.75);
+      backdrop-filter: blur(14px);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0px 8px 30px rgba(0, 0, 0, 0.05);
     }
 
     .header-title {
       font-weight: 800;
-      font-size: 28px;
+      font-size: 26px;
       color: #1e293b;
     }
 
     .sub-text {
       color: #64748b;
+      font-size: 13px;
+    }
+
+    .section-title {
+      font-weight: 700;
+      font-size: 17px;
+      color: #334155;
+    }
+
+    /* Compact Form */
+    .form-control, .btn {
+      font-size: 13px !important;
+      border-radius: 10px !important;
+      padding: 8px 10px;
+    }
+
+    /* Table */
+    .table-modern th {
+      background: #f1f5f9 !important;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .table-modern td {
+      font-size: 12px;
+      vertical-align: middle;
+    }
+    .table-modern tr:hover {
+      background: #f8fafc;
+    }
+
+    /* Status Pills */
+    .pill {
+      padding: 4px 10px;
+      font-size: 11px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+    .pill-pending { background: #fff7d6; color:#b7791f; }
+    .pill-sent { background: #dcfce7; color:#166534; }
+    .pill-failed { background: #fee2e2; color:#b91c1c; }
+
+    /* Buttons */
+    .btn-primary {
+      background: #4f46e5;
+      border: none;
+    }
+    .btn-primary:hover { background: #4338ca; }
+
+    .btn-success {
+      background: #10b981;
+      border: none;
+    }
+    .btn-sm {
+      padding: 3px 8px !important;
+      font-size: 11px !important;
+      border-radius: 8px;
+    }
+
+    /* Modal */
+    .modal-content {
+      border-radius: 18px;
+      background: #ffffffda;
+      backdrop-filter: blur(12px);
     }
   </style>
 </head>
@@ -79,54 +102,53 @@
   <!-- HEADER -->
   <div class="mb-4">
     <h1 class="header-title">Sendflow SMS</h1>
-    <div class="sub-text">Sistem pengiriman SMS modern – dengan UI premium</div>
+    <div class="sub-text">Platform SMS Automation dengan UI premium & compact</div>
   </div>
 
   <div class="row g-4">
 
     <!-- LEFT PANEL -->
     <div class="col-md-4">
-      <div class="glass-card">
+      <div class="glass">
 
-        <div class="section-title mb-3">Upload Kontak</div>
+        <div class="section-title mb-2">Upload Kontak</div>
 
         <form id="uploadForm">
           <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" class="form-control mb-2">
-          <div class="text-muted small mb-3">Format Excel: nik, name, phone</div>
+          <div class="text-muted small mb-2">Format: nik, name, phone</div>
 
-          <button class="btn btn-primary w-100" id="uploadBtn" type="submit">
-            Upload & Simpan
-          </button>
+          <button class="btn btn-primary w-100" type="submit">Upload</button>
         </form>
 
-        <hr class="my-4">
+        <hr class="my-3">
 
         <div class="section-title mb-2">Template Pesan</div>
 
         <label class="small mb-1">Pesan Utama</label>
-        <textarea id="msgTemplate" class="form-control" rows="3">Halo {name}, ini reminder dari Klinik Karya Prima.</textarea>
+        <textarea id="msgTemplate" rows="3" class="form-control small">
+Halo {name}, ini reminder dari Klinik Karya Prima.
+        </textarea>
 
-        <label class="small mt-3 mb-1">Template Reminder</label>
-        <textarea id="reminderTemplate" class="form-control" rows="3"></textarea>
+        <label class="small mt-2 mb-1">Reminder</label>
+        <textarea id="reminderTemplate" rows="2" class="form-control small"></textarea>
 
         <button class="btn btn-success w-100 mt-3" id="sendBatchBtn">
           Kirim Batch (20 kontak)
         </button>
 
-        <div class="text-muted small mt-3">
-          Gunakan placeholder: <code>{name}</code>
+        <div class="text-muted mt-2 small">
+          Placeholder: <code>{name}</code>
         </div>
-
       </div>
     </div>
 
-    <!-- RIGHT PANEL -->
+    <!-- RIGHT PANEL - TABLE -->
     <div class="col-md-8">
-      <div class="glass-card">
+      <div class="glass">
 
         <div class="d-flex justify-content-between align-items-center mb-3">
           <div class="section-title">Daftar Kontak</div>
-          <input type="text" id="searchBox" class="form-control w-50" placeholder="Cari nama / nomor...">
+          <input type="text" id="searchBox" class="form-control w-50" placeholder="Cari data...">
         </div>
 
         <div class="table-responsive">
@@ -137,13 +159,13 @@
                 <th>Phone</th>
                 <th>Status</th>
                 <th>Last Sent</th>
-                <th>Last Reply</th>
+                <th>Reply</th>
                 <th>Aksi</th>
               </tr>
             </thead>
             <tbody id="contactTableBody">
               <tr>
-                <td colspan="6" class="text-center py-4 text-muted">Memuat data...</td>
+                <td colspan="6" class="text-center small py-3 text-muted">Memuat data...</td>
               </tr>
             </tbody>
           </table>
@@ -155,82 +177,126 @@
   </div>
 </div>
 
+
 <!-- MODAL DETAIL -->
 <div class="modal fade" id="detailModal" tabindex="-1">
   <div class="modal-dialog">
-    <div class="modal-content glass-card">
+    <div class="modal-content glass">
       <div class="modal-header">
         <h5 class="modal-title fw-bold">Detail Kontak</h5>
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body small">
         <div><b>Nama:</b> <span id="modalName"></span></div>
         <div><b>Phone:</b> <span id="modalPhone"></span></div>
         <div><b>Status:</b> <span id="modalStatus"></span></div>
 
-        <div class="mt-3"><b>Last Reply:</b></div>
-        <div id="modalReply" class="border p-2 rounded bg-light"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+        <div class="mt-2"><b>Last Reply</b></div>
+        <div id="modalReply" class="border rounded p-2 bg-light small"></div>
       </div>
     </div>
   </div>
 </div>
 
+<!-- MODAL REPLY -->
+<div class="modal fade" id="replyModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content glass">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold">Balas SMS</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <textarea id="replyText" rows="3" class="form-control small" placeholder="Tulis balasan..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary btn-sm" id="sendReplyBtn">Kirim</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-/* =============================
-   FUNGSI-FUNGSI DASAR (READY)
-==============================*/
 
-// Load contacts
+/* ===============================
+   LOAD & TABLE HANDLING
+================================ */
 async function loadContacts() {
-  try {
-    const res = await fetch('/api/contacts');
-    const data = await res.json();
+  const res = await fetch('/api/contacts');
+  const data = await res.json();
 
-    const table = document.getElementById("contactTableBody");
-    table.innerHTML = "";
+  const table = document.getElementById("contactTableBody");
+  table.innerHTML = "";
 
-    data.forEach(row => {
-      const tr = document.createElement("tr");
+  data.forEach(row => {
+    const tr = document.createElement("tr");
 
-      tr.innerHTML = `
-        <td>${row.name}</td>
-        <td>${row.phone}</td>
-        <td><span class="status-pill pill-${row.status}">${row.status}</span></td>
-        <td>${row.last_sent || "-"}</td>
-        <td>${row.last_reply_message || "-"}</td>
-        <td>
-          <button class="btn btn-sm btn-outline-primary" onclick='showDetail(${JSON.stringify(JSON.stringify(row))})'>
-            Detail
-          </button>
-        </td>
-      `;
+    tr.innerHTML = `
+      <td>${row.name}</td>
+      <td>${row.phone}</td>
+      <td><span class="pill pill-${row.status}">${row.status}</span></td>
+      <td>${row.last_sent || "-"}</td>
+      <td>${row.last_reply_message || "-"}</td>
+      <td class="text-nowrap">
+        <button class="btn btn-sm btn-outline-primary" onclick='showDetail(${JSON.stringify(JSON.stringify(row))})'>Detail</button>
+        <button class="btn btn-sm btn-outline-success" onclick='openReply("${row.phone}")'>Balas</button>
+      </td>
+    `;
 
-      table.appendChild(tr);
-    });
-
-  } catch (err) {
-    console.error(err);
-  }
+    table.appendChild(tr);
+  });
 }
 
-// Show detail modal
+
+/* ===============================
+   MODAL DETAIL
+================================ */
 function showDetail(dataJSON) {
   const row = JSON.parse(dataJSON);
+
   document.getElementById("modalName").innerText = row.name;
   document.getElementById("modalPhone").innerText = row.phone;
   document.getElementById("modalStatus").innerText = row.status;
   document.getElementById("modalReply").innerText = row.last_reply_message || "-";
+
   new bootstrap.Modal("#detailModal").show();
 }
 
-// Upload Excel
-document.getElementById("uploadForm").addEventListener("submit", async (e) => {
+
+/* ===============================
+   REPLY SMS
+================================ */
+let currentReplyPhone = null;
+
+function openReply(phone) {
+  currentReplyPhone = phone;
+  document.getElementById("replyText").value = "";
+  new bootstrap.Modal("#replyModal").show();
+}
+
+document.getElementById("sendReplyBtn").onclick = async () => {
+  const msg = document.getElementById("replyText").value;
+  if (!msg) return alert("Isi pesan!");
+
+  const res = await fetch("/api/reply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: currentReplyPhone, message: msg })
+  });
+
+  const data = await res.json();
+  alert(data.message || "Dikirim!");
+
+  loadContacts();
+};
+
+
+/* ===============================
+   UPLOAD FILE
+================================ */
+document.getElementById("uploadForm").addEventListener("submit", async e => {
   e.preventDefault();
   const file = document.getElementById("fileInput").files[0];
   if (!file) return alert("Pilih file!");
@@ -238,41 +304,43 @@ document.getElementById("uploadForm").addEventListener("submit", async (e) => {
   const form = new FormData();
   form.append("file", file);
 
-  const res = await fetch("/api/upload", { method:"POST", body:form });
-  const data = await res.json();
-
-  alert(data.message || "Upload selesai");
+  await fetch("/api/upload", { method:"POST", body:form });
   loadContacts();
 });
 
-// Kirim Batch
+
+/* ===============================
+   SEND BATCH
+================================ */
 document.getElementById("sendBatchBtn").onclick = async () => {
   const body = {
     message_template: document.getElementById("msgTemplate").value,
-    reminder_template: document.getElementById("reminderTemplate").value,
+    reminder_template: document.getElementById("reminderTemplate").value
   };
 
-  const res = await fetch("/api/send", {
+  await fetch("/api/send", {
     method:"POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
 
-  const data = await res.json();
-  alert(data.message || "Batch dikirim");
+  alert("Batch terkirim");
   loadContacts();
 };
 
-// Search filter
-document.getElementById("searchBox").addEventListener("input", (e) => {
+
+/* ===============================
+   SEARCH FILTER
+================================ */
+document.getElementById("searchBox").addEventListener("input", e => {
   const q = e.target.value.toLowerCase();
+
   document.querySelectorAll("#contactTableBody tr").forEach(tr => {
-    const text = tr.innerText.toLowerCase();
-    tr.style.display = text.includes(q) ? "" : "none";
+    tr.style.display = tr.innerText.toLowerCase().includes(q) ? "" : "none";
   });
 });
 
-// Load on start
+
 loadContacts();
 </script>
 
