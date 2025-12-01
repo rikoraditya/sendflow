@@ -1,173 +1,150 @@
-// =============================
-// 🕒 Timezone
-// =============================
+// 🕒 Set timezone ke Bali (WITA)
 process.env.TZ = "Asia/Makassar";
 
-// =============================
-// 📦 Import Library
-// =============================
 import express from "express";
 import multer from "multer";
 import XLSX from "xlsx";
-import axios from "axios";
 import cron from "node-cron";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import pkg from "pg";
 
-dotenv.config();
+import { Vonage } from "@vonage/server-sdk";
+import pkg from "pg";
 const { Pool } = pkg;
 
-// =============================
-// 🗄️ PostgreSQL Connection
-// =============================
+dotenv.config();
+const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// PostgreSQL Connection
 const pool = new Pool({
   host: process.env.PGHOST,
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD,
   database: process.env.PGDATABASE,
-  port: process.env.PGPORT,
-  ssl: { rejectUnauthorized: false },
+  port: process.env.PGPORT
 });
 
-// =============================
-// 🚀 Express App
-// =============================
-const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// =============================
-// 📁 Upload Config
-// =============================
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const upload = multer({
-  dest: "uploads/",
-  limits: { fileSize: 5 * 1024 * 1024 },
+// Vonage SMS Client
+const vonage = new Vonage({
+  apiKey: process.env.VONAGE_API_KEY,
+  apiSecret: process.env.VONAGE_API_SECRET
 });
 
-// =============================
-// 📥 Upload Excel & Simpan kontak
-// =============================
-app.post("/api/upload", upload.single("file"), async (req, res) => {
+// File Upload (Excel)
+const upload = multer({ dest: "uploads/" });
+
+// Serve static UI
+app.use(express.static("public"));
+
+// Upload Excel → Simpan ke DB
+app.post("/api/contacts/upload", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.json({ success: false, message: "File tidak ditemukan" });
-    }
-
     const workbook = XLSX.readFile(req.file.path);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const json = XLSX.utils.sheet_to_json(sheet);
+    const rows = XLSX.utils.sheet_to_json(sheet);
 
-    let totalInsert = 0;
+    let inserted = 0;
 
-    for (let row of json) {
+    for (const row of rows) {
       if (!row.phone) continue;
 
       await pool.query(
-        "INSERT INTO contacts (nik, name, phone, status) VALUES ($1,$2,$3,'pending')",
-        [row.nik || "", row.name || "", row.phone]
+        "INSERT INTO contacts (name, phone, status) VALUES ($1,$2,'pending')",
+        [row.name || "No Name", row.phone]
       );
-      totalInsert++;
+      inserted++;
     }
 
     fs.unlinkSync(req.file.path);
 
-    res.json({ success: true, message: "Upload berhasil", total: totalInsert });
-  } catch (err) {
-    res.json({
-      success: false,
-      message: "Gagal upload",
-      error: err.toString(),
-    });
+    res.json({ success: true, inserted });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Upload gagal" });
   }
 });
 
-// =============================
-// 💬 Twilio SMS Gateway
-// =============================
-import twilio from "twilio";
-
-const client = new twilio(
-  process.env.TWILIO_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
-
-async function sendSMS(to, message) {
-  try {
-    const res = await client.messages.create({
-      body: message,
-      from: process.env.TWILIO_NUMBER,
-      to: to.startsWith("+") ? to : "+62" + to.replace(/^0/, "")
-    });
-
-    return { success: true, sid: res.sid };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-}
-
-// =============================
-// 🚀 Kirim batch
-// =============================
+// Kirim SMS (manual)
 app.post("/api/send", async (req, res) => {
-  try {
-    const { rows: contacts } = await pool.query(
-      "SELECT * FROM contacts WHERE status='pending' ORDER BY created_at ASC LIMIT 20"
-    );
+  const { message } = req.body;
 
-    if (contacts.length === 0) {
-      return res.json({ success: false, message: "Tidak ada kontak pending" });
-    }
+  if (!message) return res.status(400).json({ error: "Message kosong" });
 
-    for (let c of contacts) {
-      const msg = req.body.message_template
-        .replace("{name}", c.name)
-        .replace("{phone}", c.phone);
+  const { rows: contacts } = await pool.query(
+    "SELECT * FROM contacts WHERE status='pending' LIMIT 20"
+  );
 
-      await sendSMS(c.phone, msg);
+  for (const c of contacts) {
+    try {
+      await vonage.sms.send({
+        to: c.phone,
+        from: process.env.VONAGE_FROM,
+        text: message
+      });
 
       await pool.query(
-        "UPDATE contacts SET status='sent', last_sent=NOW() WHERE id=$1",
+        "UPDATE contacts SET status='sent', sent_at=NOW() WHERE id=$1",
+        [c.id]
+      );
+    } catch (err) {
+      console.error(err);
+      await pool.query(
+        "UPDATE contacts SET status='failed' WHERE id=$1",
         [c.id]
       );
     }
+  }
 
-    res.json({
-      success: true,
-      message: `Berhasil mengirim ${contacts.length} SMS`,
-    });
-  } catch (err) {
-    res.json({ success: false, error: err.toString() });
+  res.json({ success: true, sent: contacts.length });
+});
+
+// Cron job kirim otomatis tiap 5 menit
+cron.schedule("*/5 * * * *", async () => {
+  console.log("CRON: Mengirim batch 20 SMS…");
+
+  const { rows: contacts } = await pool.query(
+    "SELECT * FROM contacts WHERE status='pending' LIMIT 20"
+  );
+
+  for (const c of contacts) {
+    try {
+      await vonage.sms.send({
+        to: c.phone,
+        from: process.env.VONAGE_FROM,
+        text: "Reminder dari Klinik"
+      });
+
+      await pool.query(
+        "UPDATE contacts SET status='sent', sent_at=NOW() WHERE id=$1",
+        [c.id]
+      );
+    } catch (err) {
+      console.error(err);
+    }
   }
 });
 
-// =============================
-// 📥 Webhook menerima SMS balasan
-// =============================
-app.post("/api/sms/webhook", async (req, res) => {
-  try {
-    const from = req.body.From;
-    const message = req.body.Body;
+// Inbound SMS Webhook dari Vonage
+app.post("/webhook/sms", async (req, res) => {
+  const sig = req.headers["x-webhook-secret"];
+  if (sig !== process.env.VONAGE_WEBHOOK_SECRET)
+    return res.status(403).send("Invalid secret");
 
-    await pool.query(
-      "UPDATE contacts SET last_reply_message=$1, last_reply_at=NOW() WHERE phone LIKE $2",
-      [message, "%" + from.slice(-10)]
-    );
+  const { msisdn, text } = req.body;
+  console.log("INBOUND SMS:", msisdn, text);
 
-    res.send("<Response></Response>");
-  } catch (err) {
-    res.status(500).send("Error");
-  }
+  // Simpan ke DB
+  await pool.query(
+    "INSERT INTO inbound_sms (phone, message) VALUES ($1,$2)",
+    [msisdn, text]
+  );
+
+  res.json({ ok: true });
 });
 
-// =============================
-// 🚀 Start Server
-// =============================
-app.listen(process.env.PORT, () => {
-  console.log("Server berjalan di port " + process.env.PORT);
-});
+app.listen(process.env.PORT, () =>
+  console.log(`Server berjalan di port ${process.env.PORT}`)
+);
